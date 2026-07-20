@@ -245,17 +245,19 @@
   </div>
 
   <!-- STEP 1: UPLOAD -->
-  <section id="sec-upload">
+<section id="sec-upload">
     <div class="section-label"><span class="num">01</span> Upload Source Files</div>
     <div class="upload-grid">
       <div class="drop" id="dropParent">
-        <div class="tag">Parent</div>
+        <div class="tag">Parent </div>
         <div class="fname" id="fnameParent">Drag CSV here or click to browse</div>
+        <div class="hint" id="hintParent">Expected ~50,000 rows</div>
         <input type="file" id="fileParent" accept=".csv">
       </div>
       <div class="drop" id="dropChild">
         <div class="tag">Child </div>
         <div class="fname" id="fnameChild">Drag CSV here or click to browse</div>
+        <div class="hint" id="hintChild">Expected ~50,000 rows</div>
         <input type="file" id="fileChild">
       </div>
     </div>
