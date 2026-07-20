@@ -1,0 +1,1185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ledger — CSV Reconciliation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<style>
+  :root{
+    --paper:#EDF1F5;
+    --paper-raised:#FFFFFF;
+    --ink:#1C2541;
+    --ink-soft:#5C6B80;
+    --hairline:#C7D1DE;
+    --teal:#2E8B8B;
+    --teal-soft:#DCEEEE;
+    --amber:#B45309;
+    --amber-soft:#FBEBD3;
+    --red:#B91C1C;
+    --red-soft:#FAE1E1;
+    --accent-line: repeating-linear-gradient(90deg, var(--hairline) 0 1px, transparent 1px 8px);
+    --shadow: 0 1px 2px rgba(28,37,65,0.06), 0 8px 24px -12px rgba(28,37,65,0.18);
+    --radius: 3px;
+    --mono: 'JetBrains Mono', ui-monospace, monospace;
+    --display: 'Space Grotesk', sans-serif;
+    --body: 'Inter', sans-serif;
+  }
+  html[data-theme="dark"]{
+    --paper:#10151F;
+    --paper-raised:#171E2C;
+    --ink:#E7ECF3;
+    --ink-soft:#8B98AC;
+    --hairline:#2B3548;
+    --teal:#4FB8B8;
+    --teal-soft:#123434;
+    --amber:#E6A23C;
+    --amber-soft:#3A2A0F;
+    --red:#F17070;
+    --red-soft:#3A1414;
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px -12px rgba(0,0,0,0.6);
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--paper); color:var(--ink); font-family:var(--body);
+    min-height:100vh; transition:background .2s, color .2s;
+  }
+  .wrap{max-width:1180px;margin:0 auto;padding:28px 20px 80px;}
+
+  /* ===== Header / Masthead ===== */
+  .masthead{
+    display:flex;align-items:flex-end;justify-content:space-between;
+    border-bottom:2px solid var(--ink); padding-bottom:14px; margin-bottom:26px;
+  }
+  .masthead h1{
+    font-family:var(--display); font-size:26px; font-weight:700; margin:0; letter-spacing:-.02em;
+  }
+  .masthead .sub{font-family:var(--mono); font-size:11px; color:var(--ink-soft); letter-spacing:.08em; text-transform:uppercase; margin-top:4px;}
+  .masthead-right{display:flex; align-items:center; gap:10px;}
+  .ledger-no{font-family:var(--mono); font-size:11px; color:var(--ink-soft); border:1px solid var(--hairline); border-radius:var(--radius); padding:4px 8px;}
+  .theme-toggle{
+    border:1px solid var(--hairline); background:var(--paper-raised); color:var(--ink);
+    border-radius:var(--radius); width:32px;height:32px; cursor:pointer; font-size:14px;
+    display:flex;align-items:center;justify-content:center;
+  }
+  .theme-toggle:hover{border-color:var(--ink);}
+
+  section{margin-bottom:34px;}
+  .section-label{
+    font-family:var(--mono); font-size:11px; letter-spacing:.1em; text-transform:uppercase;
+    color:var(--ink-soft); display:flex; align-items:center; gap:10px; margin-bottom:12px;
+  }
+  .section-label .num{color:var(--ink); font-weight:600;}
+  .section-label::after{content:""; flex:1; height:1px; background:var(--hairline);}
+
+  /* ===== Upload ===== */
+  .upload-grid{display:grid; grid-template-columns:1fr 1fr; gap:16px;}
+  @media (max-width:720px){.upload-grid{grid-template-columns:1fr;}}
+  .drop{
+    background:var(--paper-raised); border:1.5px dashed var(--hairline); border-radius:6px;
+    padding:22px; text-align:center; cursor:pointer; transition:border-color .15s, background .15s;
+    position:relative;
+  }
+  .drop.drag{border-color:var(--teal); background:var(--teal-soft);}
+  .drop.filled{border-style:solid; border-color:var(--teal);}
+  .drop .tag{font-family:var(--mono); font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-soft); margin-bottom:8px;}
+  .drop .fname{font-family:var(--mono); font-size:13px; font-weight:600; word-break:break-all;}
+  .drop .hint{font-size:12px; color:var(--ink-soft); margin-top:6px;}
+  .drop input{display:none;}
+  .row-actions{display:flex; justify-content:center; margin-top:18px;}
+  button.primary{
+    font-family:var(--body); font-weight:600; font-size:13px; letter-spacing:.02em;
+    background:var(--ink); color:var(--paper); border:none; padding:11px 26px; border-radius:var(--radius);
+    cursor:pointer;
+  }
+  button.primary:disabled{opacity:.35; cursor:not-allowed;}
+  button.primary:not(:disabled):hover{opacity:.88;}
+  button.ghost{
+    font-family:var(--body); font-weight:600; font-size:12.5px;
+    background:transparent; color:var(--ink); border:1px solid var(--hairline); padding:8px 14px; border-radius:var(--radius);
+    cursor:pointer;
+  }
+  button.ghost:hover{border-color:var(--ink);}
+  button.small{padding:5px 10px; font-size:11.5px;}
+
+  .progress-wrap{margin-top:14px;}
+  .progress-label{font-family:var(--mono); font-size:11px; color:var(--ink-soft); margin-bottom:5px; display:flex; justify-content:space-between;}
+  .progress-bar{height:5px; background:var(--hairline); border-radius:3px; overflow:hidden;}
+  .progress-bar > div{height:100%; background:var(--teal); width:0%; transition:width .15s;}
+
+  /* ===== Cards ===== */
+  .card{background:var(--paper-raised); border:1px solid var(--hairline); border-radius:6px; box-shadow:var(--shadow);}
+  .card-pad{padding:18px;}
+
+  .stat-grid{display:grid; grid-template-columns:repeat(4,1fr); gap:12px;}
+  @media (max-width:820px){.stat-grid{grid-template-columns:repeat(2,1fr);}}
+  .stat{
+    background:var(--paper-raised); border:1px solid var(--hairline); border-radius:6px; padding:16px;
+    position:relative; overflow:hidden;
+  }
+  .stat::before{content:""; position:absolute; left:0; top:0; bottom:0; width:3px; background:var(--hairline);}
+  .stat.teal::before{background:var(--teal);}
+  .stat.amber::before{background:var(--amber);}
+  .stat.red::before{background:var(--red);}
+  .stat .n{font-family:var(--mono); font-size:26px; font-weight:700; line-height:1;}
+  .stat .l{font-size:11.5px; color:var(--ink-soft); margin-top:8px; letter-spacing:.02em;}
+
+  /* Stamp */
+  .stamp-row{display:flex; align-items:center; gap:18px; margin-bottom:18px; flex-wrap:wrap;}
+  .stamp{
+    font-family:var(--mono); font-weight:700; font-size:13px; letter-spacing:.12em;
+    border:2.5px solid var(--teal); color:var(--teal); padding:8px 16px; border-radius:4px;
+    transform:rotate(-3deg); text-transform:uppercase; white-space:nowrap;
+  }
+  .stamp.discrepant{border-color:var(--red); color:var(--red);}
+
+  /* ===== Mapping table ===== */
+  table.map-table{width:100%; border-collapse:collapse; font-size:13px;}
+  table.map-table th{
+    text-align:left; font-family:var(--mono); font-size:10.5px; text-transform:uppercase; letter-spacing:.06em;
+    color:var(--ink-soft); padding:8px 10px; border-bottom:1px solid var(--hairline);
+  }
+  table.map-table td{padding:8px 10px; border-bottom:1px solid var(--hairline); vertical-align:middle;}
+  table.map-table tr:last-child td{border-bottom:none;}
+  .arrow{color:var(--ink-soft); padding:0 8px; font-family:var(--mono);}
+  select, input[type=text]{
+    font-family:var(--body); font-size:13px; padding:6px 8px; border:1px solid var(--hairline);
+    border-radius:var(--radius); background:var(--paper-raised); color:var(--ink);
+  }
+  .chip{
+    display:inline-block; font-family:var(--mono); font-size:10.5px; padding:2px 7px; border-radius:10px;
+    background:var(--teal-soft); color:var(--teal); font-weight:600; letter-spacing:.03em;
+  }
+  .chip.level4{background:var(--amber-soft); color:var(--amber);}
+  .exclude-row{display:flex; align-items:center; gap:8px; padding:6px 0; font-size:13px;}
+
+  /* ===== Modal ===== */
+  .modal-backdrop{
+    position:fixed; inset:0; background:rgba(16,21,31,.55); display:none; align-items:center; justify-content:center;
+    z-index:100; padding:20px;
+  }
+  .modal-backdrop.open{display:flex;}
+  .modal{
+    background:var(--paper-raised); border-radius:8px; max-width:820px; width:100%; max-height:86vh;
+    display:flex; flex-direction:column; box-shadow:0 20px 60px rgba(0,0,0,.3);
+  }
+  .modal-head{padding:18px 22px; border-bottom:1px solid var(--hairline); display:flex; justify-content:space-between; align-items:center;}
+  .modal-head h2{font-family:var(--display); font-size:18px; margin:0;}
+  .modal-body{padding:18px 22px; overflow-y:auto;}
+  .modal-foot{padding:14px 22px; border-top:1px solid var(--hairline); display:flex; justify-content:flex-end; gap:10px;}
+  .modal-sub-title{font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--ink-soft); margin:18px 0 8px;}
+  .modal-sub-title:first-child{margin-top:0;}
+
+  /* ===== Key selection ===== */
+  .key-grid{display:flex; flex-wrap:wrap; gap:8px;}
+  .key-pill{
+    font-family:var(--mono); font-size:12.5px; border:1px solid var(--hairline); border-radius:16px;
+    padding:6px 13px; cursor:pointer; user-select:none; background:var(--paper-raised);
+  }
+  .key-pill.on{background:var(--ink); color:var(--paper); border-color:var(--ink);}
+  .key-pill .idx{display:inline-block; margin-left:6px; background:var(--teal); color:#fff; border-radius:50%; width:16px; height:16px; font-size:9.5px; line-height:16px; text-align:center;}
+
+  /* ===== Accordion ===== */
+  .accordion-item{border:1px solid var(--hairline); border-radius:6px; margin-bottom:8px; overflow:hidden; background:var(--paper-raised);}
+  .accordion-head{
+    display:flex; align-items:center; justify-content:space-between; padding:12px 16px; cursor:pointer;
+  }
+  .accordion-head:hover{background:var(--paper);}
+  .accordion-title{font-family:var(--mono); font-size:13.5px; font-weight:600; display:flex; align-items:center; gap:10px;}
+  .accordion-title .caret{transition:transform .15s; color:var(--ink-soft); font-size:11px;}
+  .accordion-item.open .caret{transform:rotate(90deg);}
+  .count-badge{font-family:var(--mono); font-size:11px; padding:2px 8px; border-radius:10px; background:var(--red-soft); color:var(--red); font-weight:700;}
+  .count-badge.amber{background:var(--amber-soft); color:var(--amber);}
+  .accordion-body{display:none; border-top:1px solid var(--hairline);}
+  .accordion-item.open .accordion-body{display:block;}
+
+  /* virtualized table */
+  .vt-shell{max-height:360px; overflow:auto; position:relative;}
+  .vt-head{
+    display:grid; position:sticky; top:0; z-index:2; background:var(--paper-raised);
+    border-bottom:1px solid var(--hairline); font-family:var(--mono); font-size:10.5px; text-transform:uppercase;
+    letter-spacing:.05em; color:var(--ink-soft);
+  }
+  .vt-head > div, .vt-row > div{padding:7px 10px; border-right:1px solid var(--hairline); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .vt-head > div:last-child, .vt-row > div:last-child{border-right:none;}
+  .vt-row{display:grid; font-family:var(--mono); font-size:12.5px; border-bottom:1px solid var(--hairline);}
+  .vt-row:hover{background:var(--paper);}
+  .vt-spacer{width:100%;}
+  .old-val{color:var(--red); text-decoration:line-through; text-decoration-thickness:1.5px;}
+  .new-val{color:var(--teal); font-weight:600; margin-left:6px;}
+  .rownum{color:var(--ink-soft);}
+
+  /* ===== Toolbar (search/filter) ===== */
+  .toolbar{display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:14px;}
+  .toolbar input[type=text]{flex:1; min-width:180px;}
+  .filter-pill{
+    font-family:var(--mono); font-size:11.5px; border:1px solid var(--hairline); border-radius:14px; padding:5px 12px;
+    cursor:pointer; background:var(--paper-raised); color:var(--ink-soft);
+  }
+  .filter-pill.on{background:var(--ink); color:var(--paper); border-color:var(--ink);}
+  label.opt{font-size:12.5px; display:flex; align-items:center; gap:6px; color:var(--ink-soft);}
+
+  .export-grid{display:flex; gap:10px; flex-wrap:wrap;}
+
+  .hidden{display:none !important;}
+  .center-note{text-align:center; color:var(--ink-soft); font-size:13px; padding:20px;}
+  .footer-note{font-family:var(--mono); font-size:10.5px; color:var(--ink-soft); text-align:center; margin-top:50px; letter-spacing:.04em;}
+  ::-webkit-scrollbar{width:9px; height:9px;}
+  ::-webkit-scrollbar-thumb{background:var(--hairline); border-radius:5px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="masthead">
+    <div>
+      <h1>Ledger</h1>
+      <div class="sub">CSV Reconciliation</div>
+    </div>
+    <div class="masthead-right">
+      <div class="ledger-no" id="ledgerNo">ENTRY № —</div>
+      <button class="theme-toggle" id="themeToggle" title="Toggle dark mode">◐</button>
+    </div>
+  </div>
+
+  <!-- STEP 1: UPLOAD -->
+  <section id="sec-upload">
+    <div class="section-label"><span class="num">01</span> Upload Source Files</div>
+    <div class="upload-grid">
+      <div class="drop" id="dropParent">
+        <div class="tag">Parent</div>
+        <div class="fname" id="fnameParent">Drag CSV here or click to browse</div>
+        <input type="file" id="fileParent" accept=".csv">
+      </div>
+      <div class="drop" id="dropChild">
+        <div class="tag">Child </div>
+        <div class="fname" id="fnameChild">Drag CSV here or click to browse</div>
+        <input type="file" id="fileChild">
+      </div>
+    </div>
+    <div class="row-actions">
+      <button class="primary" id="btnCompare" disabled>Compare Files</button>
+    </div>
+    <div class="progress-wrap hidden" id="progressWrap">
+      <div class="progress-label"><span id="progressText">Parsing…</span><span id="progressPct">0%</span></div>
+      <div class="progress-bar"><div id="progressFill"></div></div>
+    </div>
+  </section>
+
+  <!-- STEP 5: ROW COUNTS -->
+  <section id="sec-counts" class="hidden">
+    <div class="section-label"><span class="num">02</span> Row Count Validation</div>
+    <div class="card card-pad" id="countsCard"></div>
+  </section>
+
+  <!-- STEP 6: KEY SELECTION -->
+  <section id="sec-keys" class="hidden">
+    <div class="section-label"><span class="num">03</span> Primary Key Selection</div>
+    <div class="card card-pad">
+      <div style="font-size:13px; color:var(--ink-soft); margin-bottom:12px;">Select one or more columns that uniquely identify a row. Composite keys are supported — click in order.</div>
+      <div class="key-grid" id="keyGrid"></div>
+      <label class="opt" style="margin-top:16px;">
+        <input type="checkbox" id="optNullEquiv" checked> Treat NULL / null / empty string / blank as equivalent
+      </label>
+      <div class="row-actions" style="margin-top:16px;">
+        <button class="primary" id="btnRunMatch" disabled>Run Row Matching</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- STEP 9: DASHBOARD -->
+  <section id="sec-dashboard" class="hidden">
+    <div class="section-label"><span class="num">04</span> Summary Dashboard</div>
+    <div class="stamp-row" id="stampRow"></div>
+    <div class="stat-grid" id="statGrid"></div>
+  </section>
+
+  <!-- STEP 14: EXPORT -->
+  <section id="sec-export" class="hidden">
+    <div class="section-label"><span class="num">05</span> Export</div>
+    <div class="export-grid">
+      <button class="ghost" id="expSummary">Export Summary</button>
+      <button class="ghost" id="expDiffs">Export Differences</button>
+      <button class="ghost" id="expMissing">Export Missing Rows</button>
+      <button class="ghost" id="expFull">Export Full Comparison</button>
+    </div>
+  </section>
+
+  <!-- STEP 10-12: REPORT -->
+  <section id="sec-report" class="hidden">
+    <div class="section-label"><span class="num">06</span> Interactive Mismatch Report</div>
+    <div class="toolbar">
+      <input type="text" id="globalSearch" placeholder="Search by any key column…">
+      <div class="filter-pill on" data-f="mismatched">Mismatched</div>
+      <div class="filter-pill" data-f="matched">Matched (no diff)</div>
+      <div class="filter-pill" data-f="missingChild">Missing in Child</div>
+      <div class="filter-pill" data-f="missingParent">Missing in Parent</div>
+      <div class="filter-pill" data-f="duplicates">Duplicates</div>
+    </div>
+    <div id="reportBody"></div>
+  </section>
+
+  <div class="footer-note">LEDGER · BROWSER-NATIVE RECONCILIATION · NO DATA LEAVES THIS TAB</div>
+</div>
+
+<!-- MAPPING MODAL -->
+<div class="modal-backdrop" id="mapModal">
+  <div class="modal">
+    <div class="modal-head">
+      <h2>Header Mapping</h2>
+      <button class="theme-toggle" id="mapClose">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-sub-title">Automatically Mapped Columns</div>
+      <table class="map-table" id="autoMapTable"><thead><tr><th>Parent Column</th><th></th><th>Child Column</th><th>Match Level</th></tr></thead><tbody></tbody></table>
+
+      <div class="modal-sub-title hidden" id="unmatchedTitle">Unmatched Parent Columns</div>
+      <table class="map-table" id="unmatchedTable"><thead><tr><th>Parent Header</th><th></th><th>Child Header</th></tr></thead><tbody></tbody></table>
+
+      <div class="modal-sub-title">Excluded Columns</div>
+      <div id="excludeList"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="ghost" id="mapCancel">Cancel</button>
+      <button class="primary" id="mapConfirm">Confirm Mapping</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+
+/* ============ THEME ============ */
+const themeToggle = document.getElementById('themeToggle');
+themeToggle.addEventListener('click', ()=>{
+  const html = document.documentElement;
+  const cur = html.getAttribute('data-theme');
+  html.setAttribute('data-theme', cur==='dark' ? 'light' : 'dark');
+});
+document.getElementById('ledgerNo').textContent = 'ENTRY № ' + Math.floor(1000+Math.random()*8999);
+
+/* ============ STATE ============ */
+const state = {
+  parent: {file:null, rows:[], headers:[]},
+  child: {file:null, rows:[], headers:[]},
+  mapping: [],          // [{parentHeader, childHeader, level, excluded}]
+  keyColumns: [],       // parent header names, in click order
+  results: null
+};
+
+/* ============ UTIL ============ */
+function normalizeHeader(h){
+  return String(h).toLowerCase().trim()
+    .replace(/\s+/g,' ')
+    .replace(/[^a-z0-9 _]/g,'')
+    .replace(/ /g,'_')
+    .replace(/_+/g,'_')
+    .replace(/^_|_$/g,'');
+}
+function normalizeHeaderStrict(h){
+  // level 4: strip separators entirely for loose smart match
+  return normalizeHeader(h).replace(/_/g,'');
+}
+// function normalizeCell(v, nullEquiv){
+//   if(v===undefined || v===null) v='';
+//   v = String(v).trim();
+//   if(nullEquiv){
+//     if(v==='' || v.toLowerCase()==='null' || v.toLowerCase()==='none' || v.toLowerCase()==='n/a') return '';
+//     // Some exports leave a literal quoted-empty-string artifact behind after CSV
+//     // parsing (a cell whose entire content is one or more " characters) — that's
+//     // an empty value, not real data, so it should count as blank too.
+//     if(/^"+$/.test(v)) return '';
+//   }
+//   return v;
+// }
+function normalizeCell(v, nullEquiv){
+
+    if(v === undefined || v === null)
+        return "";
+
+    v = String(v)
+        .replace(/\uFEFF/g,"")
+        .replace(/\u00A0/g," ")
+        .trim();
+
+    if(/^"+$/.test(v))
+        return "";
+
+    const s = v.toLowerCase();
+
+    if(nullEquiv){
+
+        if(
+            s==="" ||
+            s==="null" ||
+            s==="none" ||
+            s==="n/a" ||
+            s==="undefined"
+        )
+            return "";
+
+    }
+
+    // Boolean normalization
+    if(s==="true") return "1";
+    if(s==="false") return "0";
+    if(s==="yes") return "1";
+    if(s==="no") return "0";
+
+    return v;
+
+}
+function normalizeDate(v){
+
+    if(!v) return "";
+
+    v = String(v).trim();
+
+    let m;
+
+    // yyyy-mm-dd
+
+    if(m=v.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/))
+        return `${m[1]}-${m[2].padStart(2,"0")}-${m[3].padStart(2,"0")}`;
+
+    // mm-dd-yy
+
+    if(m=v.match(/^(\d{1,2})-(\d{1,2})-(\d{2})$/)){
+
+        let y=+m[3];
+
+        y=y<50?2000+y:1900+y;
+
+        return `${y}-${m[1].padStart(2,"0")}-${m[2].padStart(2,"0")}`;
+
+    }
+
+    // dd.mm.yyyy
+
+    if(m=v.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/))
+        return `${m[3]}-${m[2].padStart(2,"0")}-${m[1].padStart(2,"0")}`;
+
+    // dd/mm/yyyy
+
+    if(m=v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/))
+        return `${m[3]}-${m[2].padStart(2,"0")}-${m[1].padStart(2,"0")}`;
+
+    // mm/dd/yyyy
+
+    if(m=v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/))
+        return `${m[3]}-${m[1].padStart(2,"0")}-${m[2].padStart(2,"0")}`;
+
+    return v;
+
+}
+// "1,860" / "12,345.50" — a plain number formatted with thousands separators.
+// Checked BEFORE the list comparator so formatted numbers are never split on commas.
+function isNumericWithCommas(v){
+  return /^-?\d{1,3}(,\d{3})*(\.\d+)?$/.test(v) || /^-?\d+(\.\d+)?$/.test(v);
+}
+function looksNumeric(v){
+  return v!=='' && !isNaN(v) && !isNaN(parseFloat(v));
+}
+// Multi-value fields like "ES301432 , 34868 , 34872" — same members, different order/
+// spacing, should be treated as equal. Only reached once isNumericWithCommas has
+// ruled the value out, so real numbers never get misread as lists.
+function normalizeList(v){
+  return v.split(',').map(s=>s.trim()).filter(s=>s!=='').sort().join(',');
+}
+// Cheap pre-check before attempting a full date parse, so plain text ("KS", "H")
+// never gets routed through the date comparator.
+function looksDateCandidate(v){
+  return v!=='' && matchDateParts(v)!==null;
+}
+// Tries each concrete date format seen across Orient/MySQL exports and returns
+// {y, mo, d} or null. Centralizing this means the "is it a date" check and the
+// "parse it" step can never disagree with each other.
+//   YYYY-MM-DD · MM-DD-YY (dash, 2-digit year) · M/D/YYYY · M/D/YY ·
+//   DD.MM.YYYY / DD.MM.YY (dot-separated, e.g. "27.05.2026")
+function matchDateParts(v){
+  v = String(v).trim();
+  let m;
+  if((m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(v))) return {y:+m[1], mo:+m[2], d:+m[3]};
+  if((m = /^(\d{1,2})-(\d{1,2})-(\d{2})$/.exec(v))){
+    const yy=+m[3]; return {y: yy<50?2000+yy:1900+yy, mo:+m[1], d:+m[2]};
+  }
+  if((m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(v))) return {y:+m[3], mo:+m[1], d:+m[2]};
+  if((m = /^(\d{1,2})\/(\d{1,2})\/(\d{2})$/.exec(v))){
+    const yy=+m[3]; return {y: yy<50?2000+yy:1900+yy, mo:+m[1], d:+m[2]};
+  }
+  if((m = /^(\d{1,2})\.(\d{1,2})\.(\d{4})$/.exec(v))) return {y:+m[3], mo:+m[2], d:+m[1]};
+  if((m = /^(\d{1,2})\.(\d{1,2})\.(\d{2})$/.exec(v))){
+    const yy=+m[3]; return {y: yy<50?2000+yy:1900+yy, mo:+m[2], d:+m[1]};
+  }
+  return null;
+}
+// Returns a UTC epoch (ms) or NaN if nothing matches, falling back to the
+// browser's Date.parse for anything not covered by matchDateParts.
+function parseDateFlexible(v){
+  const p = matchDateParts(v);
+  if(p) return Date.UTC(p.y, p.mo-1, p.d);
+  const t = Date.parse(String(v).trim());
+  return isNaN(t) ? NaN : t;
+}
+// Column-specific comparator dispatch: exact match first, then a numeric-with-commas
+// check, then order-insensitive list comparison, then plain numeric, then flexible
+// date — falling back to string inequality. Cheapest/most specific checks run first.
+function cellsEqual(a, b, nullEquiv) {
+
+    const na = normalizeCell(a, nullEquiv);
+    const nb = normalizeCell(b, nullEquiv);
+    // Blank
+    if (na === "" && nb === "")
+        return true;
+    // Exact
+    if (na === nb)
+        return true;
+    // Dates FIRST
+    if (looksDateCandidate(na) && looksDateCandidate(nb)) {
+        return normalizeDate(na) === normalizeDate(nb);
+    }
+    // Numbers with commas
+    if (isNumericWithCommas(na) && isNumericWithCommas(nb)) {
+        return Number(na.replace(/,/g, "")) ===
+               Number(nb.replace(/,/g, ""));
+    }
+    // Plain numbers
+    if (looksNumeric(na) && looksNumeric(nb)) {
+        return Number(na) === Number(nb);
+    }
+    // Lists
+    if (na.includes(",") || nb.includes(",")) {
+        return normalizeList(na) === normalizeList(nb);
+    }
+    return false;
+}
+function fmtNum(n){ return n.toLocaleString('en-US'); }
+function downloadCSV(filename, rows){
+  const csv = Papa.unparse(rows);
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/* ============ UPLOAD ============ */
+function setupDrop(dropEl, inputEl, fnameEl, hintEl, side){
+  dropEl.addEventListener('click', ()=> inputEl.click());
+  dropEl.addEventListener('dragover', e=>{ e.preventDefault(); dropEl.classList.add('drag'); });
+  dropEl.addEventListener('dragleave', ()=> dropEl.classList.remove('drag'));
+  dropEl.addEventListener('drop', e=>{
+    e.preventDefault(); dropEl.classList.remove('drag');
+    if(e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+  });
+  inputEl.addEventListener('change', e=>{
+    if(e.target.files.length) handleFile(e.target.files[0]);
+  });
+  function handleFile(file){
+    state[side].file = file;
+    fnameEl.textContent = file.name;
+    hintEl.textContent = (file.size/1024).toFixed(1) + ' KB';
+    dropEl.classList.add('filled');
+    checkReady();
+  }
+}
+setupDrop(document.getElementById('dropParent'), document.getElementById('fileParent'), document.getElementById('fnameParent'), document.getElementById('hintParent'), 'parent');
+setupDrop(document.getElementById('dropChild'), document.getElementById('fileChild'), document.getElementById('fnameChild'), document.getElementById('hintChild'), 'child');
+
+function checkReady(){
+  document.getElementById('btnCompare').disabled = !(state.parent.file && state.child.file);
+}
+
+document.getElementById('btnCompare').addEventListener('click', startParse);
+
+function showProgress(text){
+  document.getElementById('progressWrap').classList.remove('hidden');
+  document.getElementById('progressText').textContent = text;
+  setProgress(0);
+}
+function setProgress(pct){
+  document.getElementById('progressFill').style.width = pct+'%';
+  document.getElementById('progressPct').textContent = Math.round(pct)+'%';
+}
+function setPhaseText(text){ document.getElementById('progressText').textContent = text; }
+function hideProgress(){ document.getElementById('progressWrap').classList.add('hidden'); }
+
+function parseFile(file, onDone){
+  const rows = [];
+  let headers = [];
+  Papa.parse(file, {
+    header:true,
+    skipEmptyLines:true,
+    worker: file.size > 2*1024*1024,
+    step: function(res, parser){
+      if(headers.length===0) headers = res.meta.fields || Object.keys(res.data);
+      rows.push(res.data);
+    },
+    complete: function(){ onDone(headers, rows); },
+    error: function(err){ alert('Error parsing '+file.name+': '+err); }
+  });
+}
+
+function startParse(){
+  showProgress('Parsing Parent (Orient)…');
+  parseFile(state.parent.file, (headers, rows)=>{
+    state.parent.headers = headers; state.parent.rows = rows;
+    setProgress(50);
+    showProgress('Parsing Child (MySQL)…');
+    parseFile(state.child.file, (headers2, rows2)=>{
+      state.child.headers = headers2; state.child.rows = rows2;
+      setProgress(100);
+      setTimeout(()=>{ hideProgress(); buildMapping(); }, 200);
+    });
+  });
+}
+
+/* ============ HEADER MAPPING ============ */
+function buildMapping(){
+  const pHeaders = state.parent.headers.slice();
+  const cHeaders = state.child.headers.slice();
+  const usedChild = new Set();
+  const mapping = [];
+
+  // Level 1: exact match
+  pHeaders.forEach(ph=>{
+    if(mapping.find(m=>m.parentHeader===ph)) return;
+    const exact = cHeaders.find(ch=> ch===ph && !usedChild.has(ch));
+    if(exact){ mapping.push({parentHeader:ph, childHeader:exact, level:1}); usedChild.add(exact); }
+  });
+  // Level 2: case-insensitive
+  pHeaders.forEach(ph=>{
+    if(mapping.find(m=>m.parentHeader===ph)) return;
+    const hit = cHeaders.find(ch=> ch.toLowerCase()===ph.toLowerCase() && !usedChild.has(ch));
+    if(hit){ mapping.push({parentHeader:ph, childHeader:hit, level:2}); usedChild.add(hit); }
+  });
+  // Level 3: normalized
+  pHeaders.forEach(ph=>{
+    if(mapping.find(m=>m.parentHeader===ph)) return;
+    const np = normalizeHeader(ph);
+    const hit = cHeaders.find(ch=> normalizeHeader(ch)===np && !usedChild.has(ch));
+    if(hit){ mapping.push({parentHeader:ph, childHeader:hit, level:3}); usedChild.add(hit); }
+  });
+  // Level 4: strict/loose smart match (strip all separators)
+  pHeaders.forEach(ph=>{
+    if(mapping.find(m=>m.parentHeader===ph)) return;
+    const np = normalizeHeaderStrict(ph);
+    const hit = cHeaders.find(ch=> normalizeHeaderStrict(ch)===np && !usedChild.has(ch));
+    if(hit){ mapping.push({parentHeader:ph, childHeader:hit, level:4}); usedChild.add(hit); }
+  });
+  // Unmatched
+  pHeaders.forEach(ph=>{
+    if(!mapping.find(m=>m.parentHeader===ph)){
+      mapping.push({parentHeader:ph, childHeader:null, level:0});
+    }
+  });
+
+  state.mapping = mapping;
+  state.usedChildHeaders = usedChild;
+  openMappingModal();
+}
+
+function openMappingModal(){
+  const autoBody = document.querySelector('#autoMapTable tbody');
+  const unmatchedBody = document.querySelector('#unmatchedTable tbody');
+  const excludeList = document.getElementById('excludeList');
+  autoBody.innerHTML=''; unmatchedBody.innerHTML=''; excludeList.innerHTML='';
+
+  const levelLabel = {1:'Exact',2:'Case-insensitive',3:'Normalized',4:'Smart'};
+
+  state.mapping.forEach(m=>{
+    if(m.level>0){
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${m.parentHeader}</td><td class="arrow">→</td><td>${m.childHeader}</td>
+        <td><span class="chip ${m.level===4?'level4':''}">${levelLabel[m.level]}</span></td>`;
+      autoBody.appendChild(tr);
+    }
+  });
+
+  const unmatched = state.mapping.filter(m=>m.level===0);
+  document.getElementById('unmatchedTitle').classList.toggle('hidden', unmatched.length===0);
+  const allChild = state.child.headers;
+  unmatched.forEach(m=>{
+    const tr = document.createElement('tr');
+    const availableChild = allChild.filter(ch=> !state.mapping.some(mm=>mm.childHeader===ch));
+    let opts = `<option value="">— Select —</option>`;
+    availableChild.forEach(ch=> opts += `<option value="${ch}">${ch}</option>`);
+    allChild.forEach(ch=>{ if(!availableChild.includes(ch)) opts += `<option value="${ch}">${ch} (used)</option>`; });
+    tr.innerHTML = `<td>${m.parentHeader}</td><td class="arrow">→</td><td><select data-parent="${m.parentHeader}">${opts}</select></td>`;
+    unmatchedBody.appendChild(tr);
+  });
+
+  // Exclude checkboxes for ALL parent headers (any column can be excluded)
+  state.parent.headers.forEach(ph=>{
+    const row = document.createElement('label');
+    row.className='exclude-row';
+    row.innerHTML = `<input type="checkbox" data-exclude="${ph}"> Ignore <strong style="font-family:var(--mono); font-size:12px;">${ph}</strong>`;
+    excludeList.appendChild(row);
+  });
+
+  document.getElementById('mapModal').classList.add('open');
+}
+
+document.getElementById('mapClose').addEventListener('click', ()=> document.getElementById('mapModal').classList.remove('open'));
+document.getElementById('mapCancel').addEventListener('click', ()=> document.getElementById('mapModal').classList.remove('open'));
+
+document.getElementById('mapConfirm').addEventListener('click', ()=>{
+  // apply manual selections
+  document.querySelectorAll('#unmatchedTable select').forEach(sel=>{
+    const ph = sel.getAttribute('data-parent');
+    const val = sel.value;
+    const m = state.mapping.find(mm=>mm.parentHeader===ph);
+    if(val){ m.childHeader = val; m.level = 5; } // 5 = manual
+  });
+  // apply exclusions
+  const excluded = new Set();
+  document.querySelectorAll('#excludeList input[type=checkbox]:checked').forEach(cb=>{
+    excluded.add(cb.getAttribute('data-exclude'));
+  });
+  state.mapping.forEach(m=> m.excluded = excluded.has(m.parentHeader));
+
+  document.getElementById('mapModal').classList.remove('open');
+  showRowCounts();
+  showKeySelection();
+  document.getElementById('sec-counts').classList.remove('hidden');
+  document.getElementById('sec-keys').classList.remove('hidden');
+  document.getElementById('sec-counts').scrollIntoView({behavior:'smooth', block:'start'});
+});
+
+/* ============ ROW COUNTS ============ */
+function showRowCounts(){
+  const pCount = state.parent.rows.length, cCount = state.child.rows.length;
+  const diff = Math.abs(pCount-cCount);
+  const el = document.getElementById('countsCard');
+  if(pCount===cCount){
+    el.innerHTML = `<div style="display:flex; gap:34px; align-items:center; flex-wrap:wrap;">
+      <div><span style="color:var(--teal); font-weight:700;">✓</span> Parent Rows: <strong style="font-family:var(--mono);">${fmtNum(pCount)}</strong></div>
+      <div><span style="color:var(--teal); font-weight:700;">✓</span> Child Rows: <strong style="font-family:var(--mono);">${fmtNum(cCount)}</strong></div>
+    </div>`;
+  } else {
+    el.innerHTML = `<div style="display:flex; gap:34px; align-items:center; flex-wrap:wrap;">
+      <div>Parent Rows: <strong style="font-family:var(--mono);">${fmtNum(pCount)}</strong></div>
+      <div>Child Rows: <strong style="font-family:var(--mono);">${fmtNum(cCount)}</strong></div>
+      <div style="color:var(--amber); font-weight:600;">Difference: ${fmtNum(diff)} rows</div>
+    </div>`;
+  }
+}
+
+/* ============ KEY SELECTION ============ */
+function showKeySelection(){
+  const grid = document.getElementById('keyGrid');
+  grid.innerHTML='';
+  state.keyColumns = [];
+  const validParents = state.mapping.filter(m=>m.childHeader && !m.excluded);
+
+  function rerender(){
+    grid.querySelectorAll('.key-pill').forEach(pill=>{
+      const name = pill.dataset.name;
+      const idx = state.keyColumns.indexOf(name);
+      pill.classList.toggle('on', idx>-1);
+      pill.innerHTML = name + (idx>-1 ? `<span class="idx">${idx+1}</span>` : '');
+    });
+  }
+  grid.innerHTML='';
+  validParents.forEach(m=>{
+    const pill = document.createElement('div');
+    pill.className='key-pill';
+    pill.dataset.name = m.parentHeader;
+    pill.textContent = m.parentHeader;
+    pill.addEventListener('click', ()=>{
+      const idx = state.keyColumns.indexOf(m.parentHeader);
+      if(idx>-1) state.keyColumns.splice(idx,1); else state.keyColumns.push(m.parentHeader);
+      rerender();
+      document.getElementById('btnRunMatch').disabled = state.keyColumns.length===0;
+    });
+    grid.appendChild(pill);
+  });
+}
+
+document.getElementById('btnRunMatch').addEventListener('click', ()=> runMatching());
+
+/* ============ ROW MATCHING + CELL COMPARISON ============ */
+function nextFrame(){ return new Promise(res=> requestAnimationFrame(()=>requestAnimationFrame(res))); }
+
+async function runMatching(){
+  document.getElementById('btnRunMatch').disabled = true;
+  showProgress('Building maps…');
+  await nextFrame();
+
+  const nullEquiv = document.getElementById('optNullEquiv').checked;
+  const mapping = state.mapping.filter(m=> m.childHeader && !m.excluded);
+  const keyCols = state.keyColumns;
+  const keyColSet = new Set(keyCols);
+  // Resolve each key's child-side header once, up front — avoids an O(mapping
+  // length) lookup per row per key column inside the hot matching loop.
+  const keyChildHeaders = keyCols.map(pk=> state.mapping.find(mm=>mm.parentHeader===pk).childHeader);
+
+  const childKeyGetter = (row)=> keyChildHeaders.map(ch=> normalizeCell(row[ch], true)).join('‡');
+  const parentKeyGetter = (row)=> keyCols.map(pk=> normalizeCell(row[pk], true)).join('‡');
+
+  // Build child map: key -> {indices, pointer}. Duplicates are consumed with a
+  // pointer instead of Array.shift(), so pairing stays O(1) per row rather than
+  // O(n) per shift on large duplicate groups.
+  const childMap = new Map();
+  state.child.rows.forEach((row, i)=>{
+    const k = childKeyGetter(row);
+    let bucket = childMap.get(k);
+    if(!bucket){ bucket = {indices:[], pointer:0}; childMap.set(k, bucket); }
+    bucket.indices.push(i);
+  });
+  const parentCountByKey = new Map();
+  state.parent.rows.forEach(prow=>{
+    const k = parentKeyGetter(prow);
+    parentCountByKey.set(k, (parentCountByKey.get(k)||0)+1);
+  });
+
+  setProgress(20);
+  setPhaseText('Matching rows…');
+  await nextFrame();
+
+  const matchedPairs = [];      // {parentIdx, childIdx, key}
+  const missingInChild = [];    // parent rows with no child match left to pair
+  const duplicateKeys = new Set();
+
+  state.parent.rows.forEach((prow, pi)=>{
+    const k = parentKeyGetter(prow);
+    const bucket = childMap.get(k);
+    if((parentCountByKey.get(k)||0) > 1 || (bucket && bucket.indices.length > 1)){
+      duplicateKeys.add(k);
+    }
+    if(bucket && bucket.pointer < bucket.indices.length){
+      const ci = bucket.indices[bucket.pointer++]; // consume next in file order
+      matchedPairs.push({parentIdx:pi, childIdx:ci, key:k});
+    } else {
+      missingInChild.push(pi);
+    }
+  });
+
+  // Whatever's left unconsumed past each bucket's pointer are child rows with
+  // no parent counterpart to pair against.
+  const missingInParent = [];
+  childMap.forEach(bucket=>{
+    for(let i=bucket.pointer;i<bucket.indices.length;i++) missingInParent.push(bucket.indices[i]);
+  });
+  missingInParent.sort((a,b)=>a-b);
+
+  setProgress(55);
+  setPhaseText('Comparing columns…');
+  await nextFrame();
+
+  // Cell comparison across matched pairs. This is the heaviest step (rows ×
+  // columns comparisons), so it runs in batches with a UI yield between each —
+  // keeps the tab responsive on full 40k+ row files instead of blocking for
+  // several seconds straight, and lets the progress bar advance for real.
+  const compareCols = mapping.filter(m=> !keyColSet.has(m.parentHeader));
+  const columnDiffs = {}; // colName -> [{key, parentVal, childVal, parentIdx, childIdx}]
+  compareCols.forEach(m=> columnDiffs[m.parentHeader]=[]);
+
+  const matchedRowsDetail = []; // for full export / matched filter
+  const CHUNK = 3000;
+  for(let start=0; start<matchedPairs.length; start+=CHUNK){
+    const end = Math.min(matchedPairs.length, start+CHUNK);
+    for(let i=start;i<end;i++){
+      const pair = matchedPairs[i];
+      const prow = state.parent.rows[pair.parentIdx];
+      const crow = state.child.rows[pair.childIdx];
+      let hasDiff = false;
+      for(let c=0;c<compareCols.length;c++){
+        const m = compareCols[c];
+        const pv = prow[m.parentHeader];
+        const cv = crow[m.childHeader];
+        if(!cellsEqual(pv, cv, nullEquiv)){
+          hasDiff = true;
+          columnDiffs[m.parentHeader].push({
+            key: pair.key, parentVal: pv, childVal: cv,
+            parentIdx: pair.parentIdx, childIdx: pair.childIdx
+          });
+        }
+      }
+      matchedRowsDetail.push({...pair, hasDiff});
+    }
+    setProgress(55 + Math.round((end/Math.max(1,matchedPairs.length))*30)); // 55% -> 85%
+    await nextFrame();
+  }
+
+  const totalCellDiffs = Object.values(columnDiffs).reduce((s,arr)=>s+arr.length,0);
+  const columnsWithDiffs = Object.values(columnDiffs).filter(arr=>arr.length>0).length;
+
+  state.results = {
+    mapping, keyCols, nullEquiv,
+    matchedPairs, matchedRowsDetail, missingInChild, missingInParent,
+    duplicateKeys, columnDiffs, totalCellDiffs, columnsWithDiffs
+  };
+
+  setProgress(85);
+  setPhaseText('Rendering report…');
+  await nextFrame();
+
+  renderDashboard();
+  renderReport();
+  document.getElementById('sec-dashboard').classList.remove('hidden');
+  document.getElementById('sec-export').classList.remove('hidden');
+  document.getElementById('sec-report').classList.remove('hidden');
+  setProgress(100);
+  await nextFrame();
+  hideProgress();
+  document.getElementById('btnRunMatch').disabled = false;
+  document.getElementById('sec-dashboard').scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+/* ============ DASHBOARD ============ */
+function renderDashboard(){
+  const r = state.results;
+  const perfect = r.totalCellDiffs===0 && r.missingInChild.length===0 && r.missingInParent.length===0 && r.duplicateKeys.size===0;
+  document.getElementById('stampRow').innerHTML = `
+    <div class="stamp ${perfect?'':'discrepant'}">${perfect?'Reconciled':'Discrepancies Found'}</div>
+    <div style="font-size:12.5px; color:var(--ink-soft);">${state.parent.file.name} <span style="opacity:.5;">vs</span> ${state.child.file.name}</div>
+  `;
+  const stats = [
+    {n: fmtNum(state.parent.rows.length), l:'Total Parent Rows', c:''},
+    {n: fmtNum(state.child.rows.length), l:'Total Child Rows', c:''},
+    {n: fmtNum(r.matchedPairs.length), l:'Matched Rows', c:'teal'},
+    {n: fmtNum(r.missingInChild.length), l:'Missing in Child', c:'amber'},
+    {n: fmtNum(r.missingInParent.length), l:'Missing in Parent', c:'amber'},
+    {n: fmtNum(r.mapping.length - r.keyCols.length), l:'Columns Compared', c:''},
+    {n: fmtNum(r.columnsWithDiffs), l:'Columns with Differences', c: r.columnsWithDiffs? 'red':'teal'},
+    {n: fmtNum(r.totalCellDiffs), l:'Total Cell Differences', c: r.totalCellDiffs? 'red':'teal'},
+  ];
+  document.getElementById('statGrid').innerHTML = stats.map(s=>`
+    <div class="stat ${s.c}"><div class="n">${s.n}</div><div class="l">${s.l}</div></div>
+  `).join('');
+}
+
+/* ============ VIRTUALIZED TABLE RENDERER ============ */
+function renderVirtualTable(container, columns, rows, rowTemplateFn, rowHeight=32){
+  container.innerHTML='';
+  const shell = document.createElement('div');
+  shell.className='vt-shell';
+  const head = document.createElement('div');
+  head.className='vt-head';
+  head.style.gridTemplateColumns = columns.map(c=>c.width||'1fr').join(' ');
+  head.innerHTML = columns.map(c=>`<div>${c.label}</div>`).join('');
+  shell.appendChild(head);
+
+  const spacer = document.createElement('div');
+  spacer.className='vt-spacer';
+  spacer.style.height = (rows.length*rowHeight)+'px';
+  spacer.style.position='relative';
+  shell.appendChild(spacer);
+
+  const rowsLayer = document.createElement('div');
+  rowsLayer.style.position='absolute'; rowsLayer.style.top='0'; rowsLayer.style.left='0'; rowsLayer.style.right='0';
+  spacer.appendChild(rowsLayer);
+
+  function drawRows(){
+    const scrollTop = shell.scrollTop;
+    const viewH = shell.clientHeight;
+    const start = Math.max(0, Math.floor(scrollTop/rowHeight) - 6);
+    const end = Math.min(rows.length, Math.ceil((scrollTop+viewH)/rowHeight) + 6);
+    let html = '';
+    for(let i=start;i<end;i++){
+      html += `<div class="vt-row" style="grid-template-columns:${columns.map(c=>c.width||'1fr').join(' ')}; position:absolute; top:${i*rowHeight}px; left:0; right:0; height:${rowHeight}px;">${rowTemplateFn(rows[i], i)}</div>`;
+    }
+    rowsLayer.innerHTML = html;
+  }
+  shell.addEventListener('scroll', drawRows);
+  container.appendChild(shell);
+  drawRows();
+  if(rows.length===0){
+    shell.style.display='none';
+    const note = document.createElement('div');
+    note.className='center-note'; note.textContent='No rows to display.';
+    container.appendChild(note);
+  }
+}
+
+/* ============ REPORT (accordions, search, filters) ============ */
+let activeFilters = new Set(['mismatched']);
+let searchTerm = '';
+
+document.querySelectorAll('.filter-pill').forEach(pill=>{
+  pill.addEventListener('click', ()=>{
+    const f = pill.dataset.f;
+    if(activeFilters.has(f)){ activeFilters.delete(f); pill.classList.remove('on'); }
+    else { activeFilters.add(f); pill.classList.add('on'); }
+    renderReport();
+  });
+});
+document.getElementById('globalSearch').addEventListener('input', e=>{
+  searchTerm = e.target.value.trim().toLowerCase();
+  renderReport();
+});
+
+function renderReport(){
+  const r = state.results;
+  const body = document.getElementById('reportBody');
+  body.innerHTML='';
+
+  if(activeFilters.has('mismatched')){
+    const section = document.createElement('div');
+    section.innerHTML = `<div class="modal-sub-title">Mismatches by Column</div>`;
+    body.appendChild(section);
+    Object.entries(r.columnDiffs).forEach(([col, diffs])=>{
+      if(diffs.length===0) return;
+      let filtered = diffs;
+      if(searchTerm) filtered = diffs.filter(d=> d.key.toLowerCase().includes(searchTerm));
+      if(filtered.length===0) return;
+      body.appendChild(buildAccordion(
+        `${col}`, filtered.length, 'red',
+        (container)=>{
+          renderVirtualTable(container, [
+            {label:'Row', width:'70px'}, {label:'Key', width:'1.4fr'}, {label:'Parent', width:'1fr'}, {label:'Child', width:'1fr'}
+          ], filtered, (d,i)=>`
+            <div class="rownum">${d.parentIdx+1}</div>
+            <div>${escapeHtml(d.key)}</div>
+            <div class="old-val">${escapeHtml(String(d.parentVal ?? ''))}</div>
+            <div class="new-val">${escapeHtml(String(d.childVal ?? ''))}</div>
+          `);
+        }
+      ));
+    });
+  }
+
+  if(activeFilters.has('missingChild')){
+    let rows = r.missingInChild.map(pi=>state.parent.rows[pi]);
+    if(searchTerm) rows = rows.filter(row=> r.keyCols.some(k=> String(row[k]).toLowerCase().includes(searchTerm)));
+    body.appendChild(buildAccordion('Missing in Child', rows.length, 'amber', (container)=>{
+      const cols = r.keyCols.map(k=>({label:k, width:'1fr'}));
+      renderVirtualTable(container, cols, rows, (row)=> r.keyCols.map(k=>`<div>${escapeHtml(String(row[k] ?? ''))}</div>`).join(''));
+    }));
+  }
+
+  if(activeFilters.has('missingParent')){
+    let rows = r.missingInParent.map(ci=>state.child.rows[ci]);
+    const childKeyCols = r.keyCols.map(pk=> r.mapping.find(m=>m.parentHeader===pk).childHeader);
+    if(searchTerm) rows = rows.filter(row=> childKeyCols.some(k=> String(row[k]).toLowerCase().includes(searchTerm)));
+    body.appendChild(buildAccordion('Missing in Parent', rows.length, 'amber', (container)=>{
+      const cols = childKeyCols.map(k=>({label:k, width:'1fr'}));
+      renderVirtualTable(container, cols, rows, (row)=> childKeyCols.map(k=>`<div>${escapeHtml(String(row[k] ?? ''))}</div>`).join(''));
+    }));
+  }
+
+  if(activeFilters.has('duplicates')){
+    const keys = [...r.duplicateKeys];
+    let filtered = keys;
+    if(searchTerm) filtered = keys.filter(k=> k.toLowerCase().includes(searchTerm));
+    body.appendChild(buildAccordion('Duplicate Keys', filtered.length, 'amber', (container)=>{
+      renderVirtualTable(container, [{label:'Key', width:'1fr'}], filtered, (k)=>`<div>${escapeHtml(k)}</div>`);
+    }));
+  }
+
+  if(activeFilters.has('matched')){
+    let rows = r.matchedRowsDetail.filter(d=>!d.hasDiff);
+    if(searchTerm) rows = rows.filter(d=> d.key.toLowerCase().includes(searchTerm));
+    body.appendChild(buildAccordion('Matched Rows (no differences)', rows.length, 'teal', (container)=>{
+      renderVirtualTable(container, [{label:'Row', width:'80px'},{label:'Key', width:'1fr'}], rows, (d)=>`
+        <div class="rownum">${d.parentIdx+1}</div><div>${escapeHtml(d.key)}</div>
+      `);
+    }));
+  }
+
+  if(body.children.length===0){
+    body.innerHTML = `<div class="center-note">Select a filter above to view results.</div>`;
+  }
+}
+
+function buildAccordion(title, count, tone, renderFn){
+  const item = document.createElement('div');
+  item.className='accordion-item';
+  const head = document.createElement('div');
+  head.className='accordion-head';
+  const badgeClass = tone==='amber' ? 'count-badge amber' : 'count-badge';
+  const badgeStyle = tone==='teal' ? 'background:var(--teal-soft);color:var(--teal);' : '';
+  head.innerHTML = `<div class="accordion-title"><span class="caret">▸</span> ${escapeHtml(title)}</div><span class="${badgeClass}" style="${badgeStyle}">${fmtNum(count)}</span>`;
+  const bodyEl = document.createElement('div');
+  bodyEl.className='accordion-body';
+  let built = false;
+  head.addEventListener('click', ()=>{
+    item.classList.toggle('open');
+    if(item.classList.contains('open') && !built){
+      renderFn(bodyEl);
+      built = true;
+    }
+  });
+  item.appendChild(head); item.appendChild(bodyEl);
+  return item;
+}
+
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+/* ============ EXPORT ============ */
+document.getElementById('expSummary').addEventListener('click', ()=>{
+  const r = state.results;
+  const rows = [
+    {Metric:'Total Parent Rows', Value: state.parent.rows.length},
+    {Metric:'Total Child Rows', Value: state.child.rows.length},
+    {Metric:'Matched Rows', Value: r.matchedPairs.length},
+    {Metric:'Missing in Child', Value: r.missingInChild.length},
+    {Metric:'Missing in Parent', Value: r.missingInParent.length},
+    {Metric:'Duplicate Keys', Value: r.duplicateKeys.size},
+    {Metric:'Columns Compared', Value: r.mapping.length - r.keyCols.length},
+    {Metric:'Columns with Differences', Value: r.columnsWithDiffs},
+    {Metric:'Total Cell Differences', Value: r.totalCellDiffs},
+  ];
+  downloadCSV('reconciliation_summary.csv', rows);
+});
+
+document.getElementById('expDiffs').addEventListener('click', ()=>{
+  const r = state.results;
+  const rows = [];
+  Object.entries(r.columnDiffs).forEach(([col,diffs])=>{
+    diffs.forEach(d=> rows.push({Column:col, Row:d.parentIdx+1, Key:d.key, ParentValue:d.parentVal, ChildValue:d.childVal}));
+  });
+  downloadCSV('reconciliation_differences.csv', rows.length?rows:[{Column:'',Row:'',Key:'',ParentValue:'',ChildValue:''}]);
+});
+
+document.getElementById('expMissing').addEventListener('click', ()=>{
+  const r = state.results;
+  const rows = [];
+  r.missingInChild.forEach(pi=>{
+    const row = state.parent.rows[pi];
+    rows.push({Side:'Missing in Child', ...pickKeyCols(row, r.keyCols)});
+  });
+  const childKeyCols = r.keyCols.map(pk=> r.mapping.find(m=>m.parentHeader===pk).childHeader);
+  r.missingInParent.forEach(ci=>{
+    const row = state.child.rows[ci];
+    const obj = {Side:'Missing in Parent'};
+    r.keyCols.forEach((pk,i)=> obj[pk]=row[childKeyCols[i]]);
+    rows.push(obj);
+  });
+  downloadCSV('reconciliation_missing_rows.csv', rows);
+});
+function pickKeyCols(row, keyCols){
+  const o={}; keyCols.forEach(k=> o[k]=row[k]); return o;
+}
+
+document.getElementById('expFull').addEventListener('click', ()=>{
+  const r = state.results;
+  const rows = [];
+  r.matchedRowsDetail.forEach(d=>{
+    const prow = state.parent.rows[d.parentIdx];
+    const obj = {Key:d.key, Status: d.hasDiff?'Mismatch':'Match'};
+    r.mapping.forEach(m=>{
+      if(r.keyCols.includes(m.parentHeader)) return;
+      obj[m.parentHeader+' (Parent)'] = prow[m.parentHeader];
+      obj[m.parentHeader+' (Child)'] = state.child.rows[d.childIdx][m.childHeader];
+    });
+    rows.push(obj);
+  });
+  r.missingInChild.forEach(pi=>{
+    const prow = state.parent.rows[pi];
+    const obj = {Key: r.keyCols.map(k=>prow[k]).join('‡'), Status:'Missing in Child'};
+    rows.push(obj);
+  });
+  downloadCSV('reconciliation_full.csv', rows);
+});
+
+})();
+</script>
+</body>
+</html>
