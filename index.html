@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <style>
   :root{
     --paper:#EDF1F5;
@@ -252,13 +253,13 @@
         <div class="tag">Parent </div>
         <div class="fname" id="fnameParent">Drag CSV here or click to browse</div>
         <div class="hint" id="hintParent">Expected ~50,000 rows</div>
-        <input type="file" id="fileParent" accept=".csv">
-      </div>
+<input type="file" id="fileParent" accept=".csv,.xlsx,.xls">    
+  </div>
       <div class="drop" id="dropChild">
         <div class="tag">Child </div>
         <div class="fname" id="fnameChild">Drag CSV here or click to browse</div>
         <div class="hint" id="hintChild">Expected ~50,000 rows</div>
-        <input type="file" id="fileChild">
+        <input type="file" id="fileChild" accept=".csv,.xlsx,.xls">
       </div>
     </div>
     <div class="row-actions">
@@ -268,8 +269,40 @@
       <div class="progress-label"><span id="progressText">Parsing…</span><span id="progressPct">0%</span></div>
       <div class="progress-bar"><div id="progressFill"></div></div>
     </div>
+    
   </section>
+<section id="sec-sheets" class="hidden">
 
+    <div class="section-label">
+        <span class="num">02</span>
+        Worksheet Selection
+    </div>
+
+    <div class="card card-pad">
+
+        <div class="upload-grid">
+
+            <div>
+                <label>Parent Worksheet</label>
+                <select id="parentSheet"></select>
+            </div>
+
+            <div>
+                <label>Child Worksheet</label>
+                <select id="childSheet"></select>
+            </div>
+
+        </div>
+
+        <div class="row-actions">
+            <button class="primary" id="btnLoadSheets">
+                Continue
+            </button>
+        </div>
+
+    </div>
+
+</section>
   <!-- STEP 5: ROW COUNTS -->
   <section id="sec-counts" class="hidden">
     <div class="section-label"><span class="num">02</span> Row Count Validation</div>
@@ -364,11 +397,20 @@ document.getElementById('ledgerNo').textContent = 'ENTRY № ' + Math.floor(1000
 
 /* ============ STATE ============ */
 const state = {
-  parent: {file:null, rows:[], headers:[]},
-  child: {file:null, rows:[], headers:[]},
-  mapping: [],          // [{parentHeader, childHeader, level, excluded}]
-  keyColumns: [],       // parent header names, in click order
-  results: null
+  parent: {
+      file: null,
+      workbook: null,
+      rows: [],
+      headers: [],
+      selectedSheet: null
+  },
+  child: {
+      file: null,
+      workbook: null,
+      rows: [],
+      headers: [],
+      selectedSheet: null
+  },
 };
 
 /* ============ UTIL ============ */
@@ -381,23 +423,9 @@ function normalizeHeader(h){
     .replace(/^_|_$/g,'');
 }
 function normalizeHeaderStrict(h){
-  // level 4: strip separators entirely for loose smart match
   return normalizeHeader(h).replace(/_/g,'');
 }
-// function normalizeCell(v, nullEquiv){
-//   if(v===undefined || v===null) v='';
-//   v = String(v).trim();
-//   if(nullEquiv){
-//     if(v==='' || v.toLowerCase()==='null' || v.toLowerCase()==='none' || v.toLowerCase()==='n/a') return '';
-//     // Some exports leave a literal quoted-empty-string artifact behind after CSV
-//     // parsing (a cell whose entire content is one or more " characters) — that's
-//     // an empty value, not real data, so it should count as blank too.
-//     if(/^"+$/.test(v)) return '';
-//   }
-//   return v;
-// }
 function normalizeCell(v, nullEquiv){
-
     if(v === undefined || v === null)
         return "";
 
@@ -412,7 +440,6 @@ function normalizeCell(v, nullEquiv){
     const s = v.toLowerCase();
 
     if(nullEquiv){
-
         if(
             s==="" ||
             s==="null" ||
@@ -421,85 +448,52 @@ function normalizeCell(v, nullEquiv){
             s==="undefined"
         )
             return "";
-
     }
 
-    // Boolean normalization
     if(s==="true") return "1";
     if(s==="false") return "0";
     if(s==="yes") return "1";
     if(s==="no") return "0";
 
     return v;
-
 }
 function normalizeDate(v){
-
     if(!v) return "";
-
     v = String(v).trim();
-
     let m;
-
-    // yyyy-mm-dd
 
     if(m=v.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/))
         return `${m[1]}-${m[2].padStart(2,"0")}-${m[3].padStart(2,"0")}`;
 
-    // mm-dd-yy
-
     if(m=v.match(/^(\d{1,2})-(\d{1,2})-(\d{2})$/)){
-
         let y=+m[3];
-
         y=y<50?2000+y:1900+y;
-
         return `${y}-${m[1].padStart(2,"0")}-${m[2].padStart(2,"0")}`;
-
     }
-
-    // dd.mm.yyyy
 
     if(m=v.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/))
         return `${m[3]}-${m[2].padStart(2,"0")}-${m[1].padStart(2,"0")}`;
 
-    // dd/mm/yyyy
-
     if(m=v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/))
         return `${m[3]}-${m[2].padStart(2,"0")}-${m[1].padStart(2,"0")}`;
-
-    // mm/dd/yyyy
 
     if(m=v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/))
         return `${m[3]}-${m[1].padStart(2,"0")}-${m[2].padStart(2,"0")}`;
 
     return v;
-
 }
-// "1,860" / "12,345.50" — a plain number formatted with thousands separators.
-// Checked BEFORE the list comparator so formatted numbers are never split on commas.
 function isNumericWithCommas(v){
   return /^-?\d{1,3}(,\d{3})*(\.\d+)?$/.test(v) || /^-?\d+(\.\d+)?$/.test(v);
 }
 function looksNumeric(v){
   return v!=='' && !isNaN(v) && !isNaN(parseFloat(v));
 }
-// Multi-value fields like "ES301432 , 34868 , 34872" — same members, different order/
-// spacing, should be treated as equal. Only reached once isNumericWithCommas has
-// ruled the value out, so real numbers never get misread as lists.
 function normalizeList(v){
   return v.split(',').map(s=>s.trim()).filter(s=>s!=='').sort().join(',');
 }
-// Cheap pre-check before attempting a full date parse, so plain text ("KS", "H")
-// never gets routed through the date comparator.
 function looksDateCandidate(v){
   return v!=='' && matchDateParts(v)!==null;
 }
-// Tries each concrete date format seen across Orient/MySQL exports and returns
-// {y, mo, d} or null. Centralizing this means the "is it a date" check and the
-// "parse it" step can never disagree with each other.
-//   YYYY-MM-DD · MM-DD-YY (dash, 2-digit year) · M/D/YYYY · M/D/YY ·
-//   DD.MM.YYYY / DD.MM.YY (dot-separated, e.g. "27.05.2026")
 function matchDateParts(v){
   v = String(v).trim();
   let m;
@@ -517,47 +511,27 @@ function matchDateParts(v){
   }
   return null;
 }
-// Returns a UTC epoch (ms) or NaN if nothing matches, falling back to the
-// browser's Date.parse for anything not covered by matchDateParts.
-function parseDateFlexible(v){
-  const p = matchDateParts(v);
-  if(p) return Date.UTC(p.y, p.mo-1, p.d);
-  const t = Date.parse(String(v).trim());
-  return isNaN(t) ? NaN : t;
-}
-// Column-specific comparator dispatch: exact match first, then a numeric-with-commas
-// check, then order-insensitive list comparison, then plain numeric, then flexible
-// date — falling back to string inequality. Cheapest/most specific checks run first.
 function cellsEqual(a, b, nullEquiv) {
-
     const na = normalizeCell(a, nullEquiv);
     const nb = normalizeCell(b, nullEquiv);
-    // Blank
-    if (na === "" && nb === "")
-        return true;
-    // Exact
-    if (na === nb)
-        return true;
-    // Dates FIRST
+    if (na === "" && nb === "") return true;
+    if (na === nb) return true;
     if (looksDateCandidate(na) && looksDateCandidate(nb)) {
         return normalizeDate(na) === normalizeDate(nb);
     }
-    // Numbers with commas
     if (isNumericWithCommas(na) && isNumericWithCommas(nb)) {
-        return Number(na.replace(/,/g, "")) ===
-               Number(nb.replace(/,/g, ""));
+        return Number(na.replace(/,/g, "")) === Number(nb.replace(/,/g, ""));
     }
-    // Plain numbers
     if (looksNumeric(na) && looksNumeric(nb)) {
         return Number(na) === Number(nb);
     }
-    // Lists
     if (na.includes(",") || nb.includes(",")) {
         return normalizeList(na) === normalizeList(nb);
     }
     return false;
 }
 function fmtNum(n){ return n.toLocaleString('en-US'); }
+
 function downloadCSV(filename, rows){
   const csv = Papa.unparse(rows);
   const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
@@ -566,6 +540,75 @@ function downloadCSV(filename, rows){
   a.href = url; a.download = filename;
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+function triggerDownload(fileName, rows, targetFile) {
+  const ext = targetFile && targetFile.name ? targetFile.name.split(".").pop().toLowerCase() : "csv";
+  const cleanName = fileName.replace(/[\\/:*?"<>|]/g,"_");
+
+  if(ext === "xlsx" || ext === "xls") {
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Reconciliation Data".substring(0,31));
+      XLSX.writeFile(wb, cleanName + ".xlsx");
+  } else {
+      downloadCSV(cleanName + ".csv", rows);
+  }
+}
+
+/* ============ DYNAMIC DOWNLOAD ROUTER ============ */
+function handleAccordionDownload(title) {
+  console.log("sdsdf")
+  const r = state.results;
+  if (!r) return;
+
+  if (title === "Missing in Child") {
+      if (!r.missingInChild.length) return alert("No missing rows.");
+      // Get the full original Parent records
+      const rows = r.missingInChild.map(pi => state.parent.rows[pi]);
+      triggerDownload("Missing_In_Child_Records", rows, state.parent.file);
+  } 
+  else if (title === "Missing in Parent") {
+      if (!r.missingInParent.length) return alert("No missing rows.");
+      // Get the full original Child records
+      const rows = r.missingInParent.map(ci => state.child.rows[ci]);
+      triggerDownload("Missing_In_Parent_Records", rows, state.child.file);
+  } 
+  else if (title === "Duplicate Keys") {
+      if (!r.duplicateKeys.size) return alert("No duplicates.");
+      const rows = Array.from(r.duplicateKeys).map(k => ({ "Duplicate Key Pattern": k }));
+      triggerDownload("Duplicate_Keys_List", rows, state.parent.file);
+  } 
+  else if (title === "Matched Rows (no differences)") {
+      const matchedNoDiffs = r.matchedRowsDetail.filter(d => !d.hasDiff);
+      if (!matchedNoDiffs.length) return alert("No matched clean rows.");
+      const rows = matchedNoDiffs.map(d => state.parent.rows[d.parentIdx]);
+      triggerDownload("Matched_Clean_Rows", rows, state.parent.file);
+  } 
+  else {
+    /* ============ DYNAMIC DOWNLOAD ROUTER ============ */
+      // Default fallback handles column-specific differences
+      const diffs = r.columnDiffs[title];
+      if (!diffs || !diffs.length) return alert("No mismatches found for this column.");
+      
+      // Look up what this Parent column maps to on the Child side
+      const mappingItem = r.mapping.find(m => m.parentHeader === title);
+      const childTitle = mappingItem ? mappingItem.childHeader : title;
+
+      const rows = diffs.map(d => {
+          const crow = state.child.rows[d.childIdx];
+          return {
+              "Key": d.key,
+              "Row Number (Child)": d.childIdx + 1,
+              [`Parent [${title}] Value`]: d.parentVal,
+              [`Child [${childTitle}] Value`]: d.childVal,
+              ...crow // Spreads the full Child row fields explicitly
+          };
+      });
+      
+      // Target state.child.file so it exports using the Child format (.xlsx or .csv structure)
+      triggerDownload(childTitle + "_Mismatches", rows, state.child.file);
+  }
 }
 
 /* ============ UPLOAD ============ */
@@ -582,6 +625,13 @@ function setupDrop(dropEl, inputEl, fnameEl, hintEl, side){
   });
   function handleFile(file){
     state[side].file = file;
+      const ext = file.name.split(".").pop().toLowerCase();
+      if(ext === "xlsx" || ext === "xls"){
+          loadWorkbook(file, side);
+      }
+      else{
+          checkReady();
+      }
     fnameEl.textContent = file.name;
     hintEl.textContent = (file.size/1024).toFixed(1) + ' KB';
     dropEl.classList.add('filled');
@@ -591,6 +641,29 @@ function setupDrop(dropEl, inputEl, fnameEl, hintEl, side){
 setupDrop(document.getElementById('dropParent'), document.getElementById('fileParent'), document.getElementById('fnameParent'), document.getElementById('hintParent'), 'parent');
 setupDrop(document.getElementById('dropChild'), document.getElementById('fileChild'), document.getElementById('fnameChild'), document.getElementById('hintChild'), 'child');
 
+function loadWorkbook(file, side){
+    const reader = new FileReader();
+    reader.onload = e=>{
+        const wb = XLSX.read(e.target.result,{ type:"array" });
+        state[side].workbook = wb;
+        populateSheetDropdown(side);
+    };
+    reader.readAsArrayBuffer(file);
+}
+function populateSheetDropdown(side){
+    const wb = state[side].workbook;
+    const select = document.getElementById(side+"Sheet");
+    select.innerHTML="";
+
+    if(wb.SheetNames.length===1){
+        state[side].selectedSheet = wb.SheetNames[0];
+    }else{
+      wb.SheetNames.forEach(name=>{
+          select.add(new Option(name,name));
+      });
+    }
+    document.getElementById("sec-sheets").classList.remove("hidden");
+}
 function checkReady(){
   document.getElementById('btnCompare').disabled = !(state.parent.file && state.child.file);
 }
@@ -609,34 +682,76 @@ function setProgress(pct){
 function setPhaseText(text){ document.getElementById('progressText').textContent = text; }
 function hideProgress(){ document.getElementById('progressWrap').classList.add('hidden'); }
 
-function parseFile(file, onDone){
-  const rows = [];
-  let headers = [];
-  Papa.parse(file, {
-    header:true,
-    skipEmptyLines:true,
-    worker: file.size > 2*1024*1024,
-    step: function(res, parser){
-      if(headers.length===0) headers = res.meta.fields || Object.keys(res.data);
-      rows.push(res.data);
-    },
-    complete: function(){ onDone(headers, rows); },
-    error: function(err){ alert('Error parsing '+file.name+': '+err); }
-  });
+function parseFile(file, onDone) {
+    const ext = file.name.split(".").pop().toLowerCase();
+    if (ext === "csv") {
+        Papa.parse(file, {
+            header: true,
+            skipEmptyLines: true,
+            worker: file.size > 2 * 1024 * 1024,
+            complete(res) {
+                const headers = res.meta.fields || [];
+                const rows = res.data;
+                onDone(headers, rows);
+            }
+        });
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const data = new Uint8Array(e.target.result);
+        const wb = XLSX.read(data, { type: "array", cellDates: false });
+        const sheet = wb.Sheets[wb.SheetNames[0]];
+        const json = XLSX.utils.sheet_to_json(sheet, { defval: "", raw: false });
+        const headers = json.length ? Object.keys(json[0]) : [];
+        onDone(headers, json);
+    };
+    reader.readAsArrayBuffer(file);
+}
+function parseWorkbookSheet(side) {
+    const wb = state[side].workbook;
+    const sheet = wb.Sheets[state[side].selectedSheet];
+    const rows = XLSX.utils.sheet_to_json(sheet, { defval: "", raw: false });
+    state[side].headers = rows.length ? Object.keys(rows[0]) : [];
+    state[side].rows = rows;
+}
+function startParse() {
+    showProgress("Parsing Parent (Orient)...");
+    if (state.parent.workbook) {
+        parseWorkbookSheet("parent");
+        setProgress(50);
+        parseChild();
+    } else {
+        parseFile(state.parent.file, (headers, rows) => {
+            state.parent.headers = headers;
+            state.parent.rows = rows;
+            setProgress(50);
+            parseChild();
+        });
+    }
 }
 
-function startParse(){
-  showProgress('Parsing Parent (Orient)…');
-  parseFile(state.parent.file, (headers, rows)=>{
-    state.parent.headers = headers; state.parent.rows = rows;
-    setProgress(50);
-    showProgress('Parsing Child (MySQL)…');
-    parseFile(state.child.file, (headers2, rows2)=>{
-      state.child.headers = headers2; state.child.rows = rows2;
-      setProgress(100);
-      setTimeout(()=>{ hideProgress(); buildMapping(); }, 200);
-    });
-  });
+function parseChild() {
+    showProgress("Parsing Child (MySQL)...");
+    if (state.child.workbook) {
+        parseWorkbookSheet("child");
+        setProgress(100);
+        setTimeout(() => {
+            hideProgress();
+            buildMapping();
+        }, 200);
+    } else {
+        parseFile(state.child.file, (headers, rows) => {
+            state.child.headers = headers;
+            state.child.rows = rows;
+            setProgress(100);
+            setTimeout(() => {
+                hideProgress();
+                buildMapping();
+            }, 200);
+        });
+    }
 }
 
 /* ============ HEADER MAPPING ============ */
@@ -646,33 +761,28 @@ function buildMapping(){
   const usedChild = new Set();
   const mapping = [];
 
-  // Level 1: exact match
   pHeaders.forEach(ph=>{
     if(mapping.find(m=>m.parentHeader===ph)) return;
     const exact = cHeaders.find(ch=> ch===ph && !usedChild.has(ch));
     if(exact){ mapping.push({parentHeader:ph, childHeader:exact, level:1}); usedChild.add(exact); }
   });
-  // Level 2: case-insensitive
   pHeaders.forEach(ph=>{
     if(mapping.find(m=>m.parentHeader===ph)) return;
     const hit = cHeaders.find(ch=> ch.toLowerCase()===ph.toLowerCase() && !usedChild.has(ch));
     if(hit){ mapping.push({parentHeader:ph, childHeader:hit, level:2}); usedChild.add(hit); }
   });
-  // Level 3: normalized
   pHeaders.forEach(ph=>{
     if(mapping.find(m=>m.parentHeader===ph)) return;
     const np = normalizeHeader(ph);
     const hit = cHeaders.find(ch=> normalizeHeader(ch)===np && !usedChild.has(ch));
     if(hit){ mapping.push({parentHeader:ph, childHeader:hit, level:3}); usedChild.add(hit); }
   });
-  // Level 4: strict/loose smart match (strip all separators)
   pHeaders.forEach(ph=>{
     if(mapping.find(m=>m.parentHeader===ph)) return;
     const np = normalizeHeaderStrict(ph);
     const hit = cHeaders.find(ch=> normalizeHeaderStrict(ch)===np && !usedChild.has(ch));
     if(hit){ mapping.push({parentHeader:ph, childHeader:hit, level:4}); usedChild.add(hit); }
   });
-  // Unmatched
   pHeaders.forEach(ph=>{
     if(!mapping.find(m=>m.parentHeader===ph)){
       mapping.push({parentHeader:ph, childHeader:null, level:0});
@@ -714,7 +824,6 @@ function openMappingModal(){
     unmatchedBody.appendChild(tr);
   });
 
-  // Exclude checkboxes for ALL parent headers (any column can be excluded)
   state.parent.headers.forEach(ph=>{
     const row = document.createElement('label');
     row.className='exclude-row';
@@ -729,14 +838,12 @@ document.getElementById('mapClose').addEventListener('click', ()=> document.getE
 document.getElementById('mapCancel').addEventListener('click', ()=> document.getElementById('mapModal').classList.remove('open'));
 
 document.getElementById('mapConfirm').addEventListener('click', ()=>{
-  // apply manual selections
   document.querySelectorAll('#unmatchedTable select').forEach(sel=>{
     const ph = sel.getAttribute('data-parent');
     const val = sel.value;
     const m = state.mapping.find(mm=>mm.parentHeader===ph);
-    if(val){ m.childHeader = val; m.level = 5; } // 5 = manual
+    if(val){ m.childHeader = val; m.level = 5; }
   });
-  // apply exclusions
   const excluded = new Set();
   document.querySelectorAll('#excludeList input[type=checkbox]:checked').forEach(cb=>{
     excluded.add(cb.getAttribute('data-exclude'));
@@ -815,16 +922,11 @@ async function runMatching(){
   const mapping = state.mapping.filter(m=> m.childHeader && !m.excluded);
   const keyCols = state.keyColumns;
   const keyColSet = new Set(keyCols);
-  // Resolve each key's child-side header once, up front — avoids an O(mapping
-  // length) lookup per row per key column inside the hot matching loop.
   const keyChildHeaders = keyCols.map(pk=> state.mapping.find(mm=>mm.parentHeader===pk).childHeader);
 
   const childKeyGetter = (row)=> keyChildHeaders.map(ch=> normalizeCell(row[ch], true)).join('‡');
   const parentKeyGetter = (row)=> keyCols.map(pk=> normalizeCell(row[pk], true)).join('‡');
 
-  // Build child map: key -> {indices, pointer}. Duplicates are consumed with a
-  // pointer instead of Array.shift(), so pairing stays O(1) per row rather than
-  // O(n) per shift on large duplicate groups.
   const childMap = new Map();
   state.child.rows.forEach((row, i)=>{
     const k = childKeyGetter(row);
@@ -842,8 +944,8 @@ async function runMatching(){
   setPhaseText('Matching rows…');
   await nextFrame();
 
-  const matchedPairs = [];      // {parentIdx, childIdx, key}
-  const missingInChild = [];    // parent rows with no child match left to pair
+  const matchedPairs = [];
+  const missingInChild = [];
   const duplicateKeys = new Set();
 
   state.parent.rows.forEach((prow, pi)=>{
@@ -853,15 +955,13 @@ async function runMatching(){
       duplicateKeys.add(k);
     }
     if(bucket && bucket.pointer < bucket.indices.length){
-      const ci = bucket.indices[bucket.pointer++]; // consume next in file order
+      const ci = bucket.indices[bucket.pointer++];
       matchedPairs.push({parentIdx:pi, childIdx:ci, key:k});
     } else {
       missingInChild.push(pi);
     }
   });
 
-  // Whatever's left unconsumed past each bucket's pointer are child rows with
-  // no parent counterpart to pair against.
   const missingInParent = [];
   childMap.forEach(bucket=>{
     for(let i=bucket.pointer;i<bucket.indices.length;i++) missingInParent.push(bucket.indices[i]);
@@ -872,15 +972,11 @@ async function runMatching(){
   setPhaseText('Comparing columns…');
   await nextFrame();
 
-  // Cell comparison across matched pairs. This is the heaviest step (rows ×
-  // columns comparisons), so it runs in batches with a UI yield between each —
-  // keeps the tab responsive on full 40k+ row files instead of blocking for
-  // several seconds straight, and lets the progress bar advance for real.
   const compareCols = mapping.filter(m=> !keyColSet.has(m.parentHeader));
-  const columnDiffs = {}; // colName -> [{key, parentVal, childVal, parentIdx, childIdx}]
+  const columnDiffs = {};
   compareCols.forEach(m=> columnDiffs[m.parentHeader]=[]);
 
-  const matchedRowsDetail = []; // for full export / matched filter
+  const matchedRowsDetail = [];
   const CHUNK = 3000;
   for(let start=0; start<matchedPairs.length; start+=CHUNK){
     const end = Math.min(matchedPairs.length, start+CHUNK);
@@ -903,7 +999,7 @@ async function runMatching(){
       }
       matchedRowsDetail.push({...pair, hasDiff});
     }
-    setProgress(55 + Math.round((end/Math.max(1,matchedPairs.length))*30)); // 55% -> 85%
+    setProgress(55 + Math.round((end/Math.max(1,matchedPairs.length))*30));
     await nextFrame();
   }
 
@@ -998,7 +1094,7 @@ function renderVirtualTable(container, columns, rows, rowTemplateFn, rowHeight=3
   }
 }
 
-/* ============ REPORT (accordions, search, filters) ============ */
+/* ============ REPORT ============ */
 let activeFilters = new Set(['mismatched']);
 let searchTerm = '';
 
@@ -1095,10 +1191,25 @@ function buildAccordion(title, count, tone, renderFn){
   head.className='accordion-head';
   const badgeClass = tone==='amber' ? 'count-badge amber' : 'count-badge';
   const badgeStyle = tone==='teal' ? 'background:var(--teal-soft);color:var(--teal);' : '';
-  head.innerHTML = `<div class="accordion-title"><span class="caret">▸</span> ${escapeHtml(title)}</div><span class="${badgeClass}" style="${badgeStyle}">${fmtNum(count)}</span>`;
+
+  head.innerHTML = `
+    <div class="accordion-title">
+        <span class="caret">▸</span>
+        ${escapeHtml(title)}
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;">
+        <button class="ghost small download-column" data-column="${escapeHtml(title)}">
+            ⬇ Download
+        </button>
+        <span class="${badgeClass}" style="${badgeStyle}">
+            ${fmtNum(count)}
+        </span>
+    </div>`;
+
   const bodyEl = document.createElement('div');
   bodyEl.className='accordion-body';
   let built = false;
+  
   head.addEventListener('click', ()=>{
     item.classList.toggle('open');
     if(item.classList.contains('open') && !built){
@@ -1106,7 +1217,17 @@ function buildAccordion(title, count, tone, renderFn){
       built = true;
     }
   });
-  item.appendChild(head); item.appendChild(bodyEl);
+  
+  item.appendChild(head);
+  item.appendChild(bodyEl);
+   
+  const btn = head.querySelector(".download-column");
+  if(btn){
+    btn.addEventListener("click", function(e){
+        e.stopPropagation();
+        handleAccordionDownload(this.dataset.column);
+    });
+  }
   return item;
 }
 
@@ -1114,7 +1235,7 @@ function escapeHtml(s){
   return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
-/* ============ EXPORT ============ */
+/* ============ BOTTOM EXPORT BUTTONS ============ */
 document.getElementById('expSummary').addEventListener('click', ()=>{
   const r = state.results;
   const rows = [
@@ -1160,6 +1281,12 @@ function pickKeyCols(row, keyCols){
   const o={}; keyCols.forEach(k=> o[k]=row[k]); return o;
 }
 
+btnLoadSheets.onclick=function(){
+    state.parent.selectedSheet = parentSheet.value;
+    state.child.selectedSheet = childSheet.value;
+    startParse();
+}
+
 document.getElementById('expFull').addEventListener('click', ()=>{
   const r = state.results;
   const rows = [];
@@ -1181,7 +1308,6 @@ document.getElementById('expFull').addEventListener('click', ()=>{
   downloadCSV('reconciliation_full.csv', rows);
 });
 
-})();
-</script>
+})();</script>
 </body>
 </html>
