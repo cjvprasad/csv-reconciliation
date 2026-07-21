@@ -250,13 +250,13 @@
     <div class="section-label"><span class="num">01</span> Upload Source Files</div>
     <div class="upload-grid">
       <div class="drop" id="dropParent">
-        <div class="tag">Parent </div>
+        <div class="tag">Source </div>
         <div class="fname" id="fnameParent">Drag CSV here or click to browse</div>
         <div class="hint" id="hintParent">Expected ~50,000 rows</div>
 <input type="file" id="fileParent" accept=".csv,.xlsx,.xls">    
   </div>
       <div class="drop" id="dropChild">
-        <div class="tag">Child </div>
+        <div class="tag">Target </div>
         <div class="fname" id="fnameChild">Drag CSV here or click to browse</div>
         <div class="hint" id="hintChild">Expected ~50,000 rows</div>
         <input type="file" id="fileChild" accept=".csv,.xlsx,.xls">
@@ -283,12 +283,12 @@
         <div class="upload-grid">
 
             <div>
-                <label>Parent Worksheet</label>
+                <label>Source Worksheet</label>
                 <select id="parentSheet"></select>
             </div>
 
             <div>
-                <label>Child Worksheet</label>
+                <label>Target Worksheet</label>
                 <select id="childSheet"></select>
             </div>
 
@@ -348,9 +348,9 @@
     <div class="toolbar">
       <input type="text" id="globalSearch" placeholder="Search by any key column…">
       <div class="filter-pill on" data-f="mismatched">Mismatched</div>
-      <div class="filter-pill" data-f="matched">Matched (no diff)</div>
-      <div class="filter-pill" data-f="missingChild">Missing in Child</div>
-      <div class="filter-pill" data-f="missingParent">Missing in Parent</div>
+      <!-- <div class="filter-pill" data-f="matched">Matched (no diff)</div> -->
+      <div class="filter-pill" data-f="missingChild">Missing in Target</div>
+      <div class="filter-pill" data-f="missingParent">Missing in Source</div>
       <div class="filter-pill" data-f="duplicates">Duplicates</div>
     </div>
     <div id="reportBody"></div>
@@ -368,10 +368,10 @@
     </div>
     <div class="modal-body">
       <div class="modal-sub-title">Automatically Mapped Columns</div>
-      <table class="map-table" id="autoMapTable"><thead><tr><th>Parent Column</th><th></th><th>Child Column</th><th>Match Level</th></tr></thead><tbody></tbody></table>
+      <table class="map-table" id="autoMapTable"><thead><tr><th>Source Column</th><th></th><th>Target Column</th><th>Match Level</th></tr></thead><tbody></tbody></table>
 
-      <div class="modal-sub-title hidden" id="unmatchedTitle">Unmatched Parent Columns</div>
-      <table class="map-table" id="unmatchedTable"><thead><tr><th>Parent Header</th><th></th><th>Child Header</th></tr></thead><tbody></tbody></table>
+      <div class="modal-sub-title hidden" id="unmatchedTitle">Unmatched Source Columns</div>
+      <table class="map-table" id="unmatchedTable"><thead><tr><th>Source Header</th><th></th><th>Target Header</th></tr></thead><tbody></tbody></table>
 
       <div class="modal-sub-title">Excluded Columns</div>
       <div id="excludeList"></div>
@@ -562,15 +562,15 @@ function handleAccordionDownload(title) {
   const r = state.results;
   if (!r) return;
 
-  if (title === "Missing in Child") {
+  if (title === "Missing in Target") {
       if (!r.missingInChild.length) return alert("No missing rows.");
-      // Get the full original Parent records
+      // Get the full original Source records
       const rows = r.missingInChild.map(pi => state.parent.rows[pi]);
       triggerDownload("Missing_In_Child_Records", rows, state.parent.file);
   } 
-  else if (title === "Missing in Parent") {
+  else if (title === "Missing in Source") {
       if (!r.missingInParent.length) return alert("No missing rows.");
-      // Get the full original Child records
+      // Get the full original Target records
       const rows = r.missingInParent.map(ci => state.child.rows[ci]);
       triggerDownload("Missing_In_Parent_Records", rows, state.child.file);
   } 
@@ -591,7 +591,7 @@ function handleAccordionDownload(title) {
       const diffs = r.columnDiffs[title];
       if (!diffs || !diffs.length) return alert("No mismatches found for this column.");
       
-      // Look up what this Parent column maps to on the Child side
+      // Look up what this Source column maps to on the Target side
       const mappingItem = r.mapping.find(m => m.parentHeader === title);
       const childTitle = mappingItem ? mappingItem.childHeader : title;
 
@@ -599,14 +599,14 @@ function handleAccordionDownload(title) {
           const crow = state.child.rows[d.childIdx];
           return {
               "Key": d.key,
-              "Row Number (Child)": d.childIdx + 1,
-              [`Parent [${title}] Value`]: d.parentVal,
-              [`Child [${childTitle}] Value`]: d.childVal,
-              ...crow // Spreads the full Child row fields explicitly
+              "Row Number (Target)": d.childIdx + 1,
+              [`Source [${title}] Value`]: d.parentVal,
+              [`Target [${childTitle}] Value`]: d.childVal,
+              ...crow // Spreads the full Target row fields explicitly
           };
       });
       
-      // Target state.child.file so it exports using the Child format (.xlsx or .csv structure)
+      // Target state.child.file so it exports using the Target format (.xlsx or .csv structure)
       triggerDownload(childTitle + "_Mismatches", rows, state.child.file);
   }
 }
@@ -651,25 +651,118 @@ function loadWorkbook(file, side){
     reader.readAsArrayBuffer(file);
 }
 function populateSheetDropdown(side){
-    const wb = state[side].workbook;
-    const select = document.getElementById(side+"Sheet");
-    select.innerHTML="";
 
-    if(wb.SheetNames.length===1){
-        state[side].selectedSheet = wb.SheetNames[0];
-    }else{
-      wb.SheetNames.forEach(name=>{
-          select.add(new Option(name,name));
-      });
+    const wb = state[side].workbook;
+    const select = document.getElementById(side + "Sheet");
+
+    select.innerHTML = "";
+
+    wb.SheetNames.forEach(name=>{
+        select.add(new Option(name, name));
+    });
+
+    // Auto-select first sheet
+    state[side].selectedSheet = wb.SheetNames[0];
+    select.value = wb.SheetNames[0];
+
+    checkWorksheetStep();
+
+}
+
+function checkWorksheetStep(){
+
+    // Wait until both files are loaded
+    if(state.parent.file && state.child.file){
+
+        const parentExcel = !!state.parent.workbook;
+        const childExcel  = !!state.child.workbook;
+
+        // Both CSV → compare directly
+        if(!parentExcel && !childExcel){
+            document.getElementById("sec-sheets").classList.add("hidden");
+            return;
+        }
+
+        // One or both Excel
+        if(parentExcel || childExcel){
+
+            const parentSheets = parentExcel ? state.parent.workbook.SheetNames.length : 1;
+            const childSheets  = childExcel  ? state.child.workbook.SheetNames.length  : 1;
+
+            // If both have only one sheet, skip worksheet selection
+            if(parentSheets === 1 && childSheets === 1){
+
+                document.getElementById("sec-sheets").classList.add("hidden");
+
+                if(parentExcel)
+                    state.parent.selectedSheet = state.parent.workbook.SheetNames[0];
+
+                if(childExcel)
+                    state.child.selectedSheet = state.child.workbook.SheetNames[0];
+
+            }
+            else{
+
+                document.getElementById("sec-sheets").classList.remove("hidden");
+
+                // Auto-match sheet names
+                if(parentExcel && childExcel){
+
+                    const parentSelect = document.getElementById("parentSheet");
+                    const childSelect  = document.getElementById("childSheet");
+
+                    for(const p of state.parent.workbook.SheetNames){
+
+                        const match = state.child.workbook.SheetNames.find(
+                            c => c.toLowerCase() === p.toLowerCase()
+                        );
+
+                        if(match){
+                            parentSelect.value = p;
+                            childSelect.value = match;
+
+                            state.parent.selectedSheet = p;
+                            state.child.selectedSheet = match;
+
+                            break;
+                        }
+                    }
+                }
+            }
+        }
     }
-    document.getElementById("sec-sheets").classList.remove("hidden");
 }
 function checkReady(){
   document.getElementById('btnCompare').disabled = !(state.parent.file && state.child.file);
 }
 
-document.getElementById('btnCompare').addEventListener('click', startParse);
+document.getElementById('btnCompare').addEventListener('click', () => {
 
+    const parentExcel = !!state.parent.workbook;
+    const childExcel  = !!state.child.workbook;
+
+    const parentSheets = parentExcel ? state.parent.workbook.SheetNames.length : 1;
+    const childSheets  = childExcel  ? state.child.workbook.SheetNames.length  : 1;
+
+    // Skip worksheet selection if unnecessary
+    if(parentSheets === 1 && childSheets === 1){
+
+        if(parentExcel)
+            state.parent.selectedSheet = state.parent.workbook.SheetNames[0];
+
+        if(childExcel)
+            state.child.selectedSheet = state.child.workbook.SheetNames[0];
+
+        startParse();
+    }
+    else{
+
+        document.getElementById("sec-sheets")
+            .scrollIntoView({behavior:"smooth"});
+
+    }
+
+});
 function showProgress(text){
   document.getElementById('progressWrap').classList.remove('hidden');
   document.getElementById('progressText').textContent = text;
@@ -717,7 +810,7 @@ function parseWorkbookSheet(side) {
     state[side].rows = rows;
 }
 function startParse() {
-    showProgress("Parsing Parent (Orient)...");
+    showProgress("Parsing Source (Orient)...");
     if (state.parent.workbook) {
         parseWorkbookSheet("parent");
         setProgress(50);
@@ -733,7 +826,7 @@ function startParse() {
 }
 
 function parseChild() {
-    showProgress("Parsing Child (MySQL)...");
+    showProgress("Parsing Target (MySQL)...");
     if (state.child.workbook) {
         parseWorkbookSheet("child");
         setProgress(100);
@@ -865,13 +958,13 @@ function showRowCounts(){
   const el = document.getElementById('countsCard');
   if(pCount===cCount){
     el.innerHTML = `<div style="display:flex; gap:34px; align-items:center; flex-wrap:wrap;">
-      <div><span style="color:var(--teal); font-weight:700;">✓</span> Parent Rows: <strong style="font-family:var(--mono);">${fmtNum(pCount)}</strong></div>
-      <div><span style="color:var(--teal); font-weight:700;">✓</span> Child Rows: <strong style="font-family:var(--mono);">${fmtNum(cCount)}</strong></div>
+      <div><span style="color:var(--teal); font-weight:700;">✓</span> Source Rows: <strong style="font-family:var(--mono);">${fmtNum(pCount)}</strong></div>
+      <div><span style="color:var(--teal); font-weight:700;">✓</span> Target Rows: <strong style="font-family:var(--mono);">${fmtNum(cCount)}</strong></div>
     </div>`;
   } else {
     el.innerHTML = `<div style="display:flex; gap:34px; align-items:center; flex-wrap:wrap;">
-      <div>Parent Rows: <strong style="font-family:var(--mono);">${fmtNum(pCount)}</strong></div>
-      <div>Child Rows: <strong style="font-family:var(--mono);">${fmtNum(cCount)}</strong></div>
+      <div>Source Rows: <strong style="font-family:var(--mono);">${fmtNum(pCount)}</strong></div>
+      <div>Target Rows: <strong style="font-family:var(--mono);">${fmtNum(cCount)}</strong></div>
       <div style="color:var(--amber); font-weight:600;">Difference: ${fmtNum(diff)} rows</div>
     </div>`;
   }
@@ -1037,11 +1130,11 @@ function renderDashboard(){
     <div style="font-size:12.5px; color:var(--ink-soft);">${state.parent.file.name} <span style="opacity:.5;">vs</span> ${state.child.file.name}</div>
   `;
   const stats = [
-    {n: fmtNum(state.parent.rows.length), l:'Total Parent Rows', c:''},
-    {n: fmtNum(state.child.rows.length), l:'Total Child Rows', c:''},
+    {n: fmtNum(state.parent.rows.length), l:'Total Source Rows', c:''},
+    {n: fmtNum(state.child.rows.length), l:'Total Target Rows', c:''},
     {n: fmtNum(r.matchedPairs.length), l:'Matched Rows', c:'teal'},
-    {n: fmtNum(r.missingInChild.length), l:'Missing in Child', c:'amber'},
-    {n: fmtNum(r.missingInParent.length), l:'Missing in Parent', c:'amber'},
+    {n: fmtNum(r.missingInChild.length), l:'Missing in Target', c:'amber'},
+    {n: fmtNum(r.missingInParent.length), l:'Missing in Source', c:'amber'},
     {n: fmtNum(r.mapping.length - r.keyCols.length), l:'Columns Compared', c:''},
     {n: fmtNum(r.columnsWithDiffs), l:'Columns with Differences', c: r.columnsWithDiffs? 'red':'teal'},
     {n: fmtNum(r.totalCellDiffs), l:'Total Cell Differences', c: r.totalCellDiffs? 'red':'teal'},
@@ -1129,7 +1222,7 @@ function renderReport(){
         `${col}`, filtered.length, 'red',
         (container)=>{
           renderVirtualTable(container, [
-            {label:'Row', width:'70px'}, {label:'Key', width:'1.4fr'}, {label:'Parent', width:'1fr'}, {label:'Child', width:'1fr'}
+            {label:'Row', width:'70px'}, {label:'Key', width:'1.4fr'}, {label:'Source', width:'1fr'}, {label:'Target', width:'1fr'}
           ], filtered, (d,i)=>`
             <div class="rownum">${d.parentIdx+1}</div>
             <div>${escapeHtml(d.key)}</div>
@@ -1144,7 +1237,7 @@ function renderReport(){
   if(activeFilters.has('missingChild')){
     let rows = r.missingInChild.map(pi=>state.parent.rows[pi]);
     if(searchTerm) rows = rows.filter(row=> r.keyCols.some(k=> String(row[k]).toLowerCase().includes(searchTerm)));
-    body.appendChild(buildAccordion('Missing in Child', rows.length, 'amber', (container)=>{
+    body.appendChild(buildAccordion('Missing in Target', rows.length, 'amber', (container)=>{
       const cols = r.keyCols.map(k=>({label:k, width:'1fr'}));
       renderVirtualTable(container, cols, rows, (row)=> r.keyCols.map(k=>`<div>${escapeHtml(String(row[k] ?? ''))}</div>`).join(''));
     }));
@@ -1154,7 +1247,7 @@ function renderReport(){
     let rows = r.missingInParent.map(ci=>state.child.rows[ci]);
     const childKeyCols = r.keyCols.map(pk=> r.mapping.find(m=>m.parentHeader===pk).childHeader);
     if(searchTerm) rows = rows.filter(row=> childKeyCols.some(k=> String(row[k]).toLowerCase().includes(searchTerm)));
-    body.appendChild(buildAccordion('Missing in Parent', rows.length, 'amber', (container)=>{
+    body.appendChild(buildAccordion('Missing in Source', rows.length, 'amber', (container)=>{
       const cols = childKeyCols.map(k=>({label:k, width:'1fr'}));
       renderVirtualTable(container, cols, rows, (row)=> childKeyCols.map(k=>`<div>${escapeHtml(String(row[k] ?? ''))}</div>`).join(''));
     }));
@@ -1239,11 +1332,11 @@ function escapeHtml(s){
 document.getElementById('expSummary').addEventListener('click', ()=>{
   const r = state.results;
   const rows = [
-    {Metric:'Total Parent Rows', Value: state.parent.rows.length},
-    {Metric:'Total Child Rows', Value: state.child.rows.length},
+    {Metric:'Total Source Rows', Value: state.parent.rows.length},
+    {Metric:'Total Target Rows', Value: state.child.rows.length},
     {Metric:'Matched Rows', Value: r.matchedPairs.length},
-    {Metric:'Missing in Child', Value: r.missingInChild.length},
-    {Metric:'Missing in Parent', Value: r.missingInParent.length},
+    {Metric:'Missing in Target', Value: r.missingInChild.length},
+    {Metric:'Missing in Source', Value: r.missingInParent.length},
     {Metric:'Duplicate Keys', Value: r.duplicateKeys.size},
     {Metric:'Columns Compared', Value: r.mapping.length - r.keyCols.length},
     {Metric:'Columns with Differences', Value: r.columnsWithDiffs},
@@ -1266,12 +1359,12 @@ document.getElementById('expMissing').addEventListener('click', ()=>{
   const rows = [];
   r.missingInChild.forEach(pi=>{
     const row = state.parent.rows[pi];
-    rows.push({Side:'Missing in Child', ...pickKeyCols(row, r.keyCols)});
+    rows.push({Side:'Missing in Target', ...pickKeyCols(row, r.keyCols)});
   });
   const childKeyCols = r.keyCols.map(pk=> r.mapping.find(m=>m.parentHeader===pk).childHeader);
   r.missingInParent.forEach(ci=>{
     const row = state.child.rows[ci];
-    const obj = {Side:'Missing in Parent'};
+    const obj = {Side:'Missing in Source'};
     r.keyCols.forEach((pk,i)=> obj[pk]=row[childKeyCols[i]]);
     rows.push(obj);
   });
@@ -1287,25 +1380,87 @@ btnLoadSheets.onclick=function(){
     startParse();
 }
 
-document.getElementById('expFull').addEventListener('click', ()=>{
-  const r = state.results;
-  const rows = [];
-  r.matchedRowsDetail.forEach(d=>{
-    const prow = state.parent.rows[d.parentIdx];
-    const obj = {Key:d.key, Status: d.hasDiff?'Mismatch':'Match'};
-    r.mapping.forEach(m=>{
-      if(r.keyCols.includes(m.parentHeader)) return;
-      obj[m.parentHeader+' (Parent)'] = prow[m.parentHeader];
-      obj[m.parentHeader+' (Child)'] = state.child.rows[d.childIdx][m.childHeader];
+document.getElementById('expFull').addEventListener('click', () => {
+
+    const r = state.results;
+    const rows = [];
+
+    r.matchedRowsDetail.forEach(d => {
+
+        const prow = state.parent.rows[d.parentIdx];
+        const crow = state.child.rows[d.childIdx];
+
+        const mismatchColumns = [];
+
+        // Summary columns
+        const obj = {
+            Key: d.key
+        };
+
+        // Compare every mapped column
+        r.mapping.forEach(m => {
+
+            if (r.keyCols.includes(m.parentHeader))
+                return;
+
+            const parentValue = prow[m.parentHeader];
+            const childValue = crow[m.childHeader];
+
+            obj[m.parentHeader + " (Parent)"] = parentValue;
+            obj[m.parentHeader + " (Child)"] = childValue;
+
+            if (!cellsEqual(parentValue, childValue, r.nullEquiv)) {
+                mismatchColumns.push(m.parentHeader);
+            }
+
+        });
+
+        // Insert summary columns at the beginning
+        const finalRow = {
+            Key: d.key,
+            "Total Differences": mismatchColumns.length,
+            "Mismatch Columns": mismatchColumns.length
+                ? mismatchColumns.join(", ")
+                : "None",
+            ...obj
+        };
+
+        rows.push(finalRow);
+
     });
-    rows.push(obj);
-  });
-  r.missingInChild.forEach(pi=>{
-    const prow = state.parent.rows[pi];
-    const obj = {Key: r.keyCols.map(k=>prow[k]).join('‡'), Status:'Missing in Child'};
-    rows.push(obj);
-  });
-  downloadCSV('reconciliation_full.csv', rows);
+
+    // Missing in Child
+    r.missingInChild.forEach(pi => {
+
+        const prow = state.parent.rows[pi];
+
+        rows.push({
+            Key: r.keyCols.map(k => prow[k]).join("‡"),
+            "Total Differences": "N/A",
+            "Mismatch Columns": "Missing in Target"
+        });
+
+    });
+
+    // Missing in Parent
+    r.missingInParent.forEach(ci => {
+
+        const crow = state.child.rows[ci];
+
+        const childKeys = r.keyCols.map(pk =>
+            r.mapping.find(m => m.parentHeader === pk).childHeader
+        );
+
+        rows.push({
+            Key: childKeys.map(k => crow[k]).join("‡"),
+            "Total Differences": "N/A",
+            "Mismatch Columns": "Missing in Source"
+        });
+
+    });
+
+    downloadCSV("reconciliation_full.csv", rows);
+
 });
 
 })();</script>
