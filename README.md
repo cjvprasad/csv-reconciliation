@@ -140,7 +140,7 @@ No backend framework is required.
 Clone the repository:
 
 ```bash
-git clone https://github.com/<your-username>/<repository-name>.git
+git clone [https://github.com/<your-username>/<repository-name>.git](https://cjvprasad.github.io/csv-reconciliation/)
 ```
 
 Open:
@@ -187,7 +187,7 @@ Folder: / (root)
 Your site will be available at:
 
 ```
-https://<your-username>.github.io/<repository-name>/
+[https://<your-username>.github.io/<repository-name>/](https://cjvprasad.github.io/csv-reconciliation/)
 ```
 
 ---
