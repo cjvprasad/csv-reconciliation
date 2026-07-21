@@ -430,9 +430,12 @@ function normalizeCell(v, nullEquiv){
         return "";
 
     v = String(v)
-        .replace(/\uFEFF/g,"")
-        .replace(/\u00A0/g," ")
-        .trim();
+    .replace(/\uFEFF/g, "")
+    .replace(/\u00A0/g, " ")
+    .trim()
+    .replace(/^"(.*)"$/, "$1")   // Remove surrounding quotes
+    .replace(/^'(.*)'$/, "$1");  // Remove surrounding single quotes
+
 
     if(/^"+$/.test(v))
         return "";
