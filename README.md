@@ -119,7 +119,7 @@ The tool automatically treats these values as equal:
 | `FALSE`                             | `No`                              |
 | `NULL`                              | *(blank)*                         |
 | `2024-05-01`                        | `01/05/2024`                      |
-| `"Advisor Confirmed(Professional)"` | `Advisor Confirmed(Professional)` |
+| `"Professional"` | `Professional` |
 
 ---
 
