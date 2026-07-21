@@ -250,15 +250,15 @@
     <div class="section-label"><span class="num">01</span> Upload Source Files</div>
     <div class="upload-grid">
       <div class="drop" id="dropParent">
-        <div class="tag">Source </div>
-        <div class="fname" id="fnameParent">Drag CSV here or click to browse</div>
-        <div class="hint" id="hintParent">Expected ~50,000 rows</div>
+       <div class="tag">Source</div>
+<div class="fname" id="fnameParent">Drag & drop a file here or click to browse</div>
+<div class="hint" id="hintParent">Supports CSV, XLS, and XLSX files</div>
 <input type="file" id="fileParent" accept=".csv,.xlsx,.xls">    
   </div>
       <div class="drop" id="dropChild">
-        <div class="tag">Target </div>
-        <div class="fname" id="fnameChild">Drag CSV here or click to browse</div>
-        <div class="hint" id="hintChild">Expected ~50,000 rows</div>
+       <div class="tag">Target</div>
+<div class="fname" id="fnameChild">Drag & drop a file here or click to browse</div>
+<div class="hint" id="hintChild">Supports CSV, XLS, and XLSX files</div>
         <input type="file" id="fileChild" accept=".csv,.xlsx,.xls">
       </div>
     </div>
@@ -435,7 +435,6 @@ function normalizeCell(v, nullEquiv){
     .trim()
     .replace(/^"(.*)"$/, "$1")   // Remove surrounding quotes
     .replace(/^'(.*)'$/, "$1");  // Remove surrounding single quotes
-
 
     if(/^"+$/.test(v))
         return "";
