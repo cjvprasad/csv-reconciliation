@@ -626,6 +626,7 @@ function setupDrop(dropEl, inputEl, fnameEl, hintEl, side){
     if(e.target.files.length) handleFile(e.target.files[0]);
   });
   function handleFile(file){
+  console.log("asdad")
     state[side].file = file;
       const ext = file.name.split(".").pop().toLowerCase();
       if(ext === "xlsx" || ext === "xls"){
@@ -1008,125 +1009,280 @@ document.getElementById('btnRunMatch').addEventListener('click', ()=> runMatchin
 /* ============ ROW MATCHING + CELL COMPARISON ============ */
 function nextFrame(){ return new Promise(res=> requestAnimationFrame(()=>requestAnimationFrame(res))); }
 
-async function runMatching(){
-  document.getElementById('btnRunMatch').disabled = true;
-  showProgress('Building maps…');
-  await nextFrame();
+async function runMatching() {
 
-  const nullEquiv = document.getElementById('optNullEquiv').checked;
-  const mapping = state.mapping.filter(m=> m.childHeader && !m.excluded);
-  const keyCols = state.keyColumns;
-  const keyColSet = new Set(keyCols);
-  const keyChildHeaders = keyCols.map(pk=> state.mapping.find(mm=>mm.parentHeader===pk).childHeader);
-
-  const childKeyGetter = (row)=> keyChildHeaders.map(ch=> normalizeCell(row[ch], true)).join('‡');
-  const parentKeyGetter = (row)=> keyCols.map(pk=> normalizeCell(row[pk], true)).join('‡');
-
-  const childMap = new Map();
-  state.child.rows.forEach((row, i)=>{
-    const k = childKeyGetter(row);
-    let bucket = childMap.get(k);
-    if(!bucket){ bucket = {indices:[], pointer:0}; childMap.set(k, bucket); }
-    bucket.indices.push(i);
-  });
-  const parentCountByKey = new Map();
-  state.parent.rows.forEach(prow=>{
-    const k = parentKeyGetter(prow);
-    parentCountByKey.set(k, (parentCountByKey.get(k)||0)+1);
-  });
-
-  setProgress(20);
-  setPhaseText('Matching rows…');
-  await nextFrame();
-
-  const matchedPairs = [];
-  const missingInChild = [];
-  const duplicateKeys = new Set();
-
-  state.parent.rows.forEach((prow, pi)=>{
-    const k = parentKeyGetter(prow);
-    const bucket = childMap.get(k);
-    if((parentCountByKey.get(k)||0) > 1 || (bucket && bucket.indices.length > 1)){
-      duplicateKeys.add(k);
-    }
-    if(bucket && bucket.pointer < bucket.indices.length){
-      const ci = bucket.indices[bucket.pointer++];
-      matchedPairs.push({parentIdx:pi, childIdx:ci, key:k});
-    } else {
-      missingInChild.push(pi);
-    }
-  });
-
-  const missingInParent = [];
-  childMap.forEach(bucket=>{
-    for(let i=bucket.pointer;i<bucket.indices.length;i++) missingInParent.push(bucket.indices[i]);
-  });
-  missingInParent.sort((a,b)=>a-b);
-
-  setProgress(55);
-  setPhaseText('Comparing columns…');
-  await nextFrame();
-
-  const compareCols = mapping.filter(m=> !keyColSet.has(m.parentHeader));
-  const columnDiffs = {};
-  compareCols.forEach(m=> columnDiffs[m.parentHeader]=[]);
-
-  const matchedRowsDetail = [];
-  const CHUNK = 3000;
-  for(let start=0; start<matchedPairs.length; start+=CHUNK){
-    const end = Math.min(matchedPairs.length, start+CHUNK);
-    for(let i=start;i<end;i++){
-      const pair = matchedPairs[i];
-      const prow = state.parent.rows[pair.parentIdx];
-      const crow = state.child.rows[pair.childIdx];
-      let hasDiff = false;
-      for(let c=0;c<compareCols.length;c++){
-        const m = compareCols[c];
-        const pv = prow[m.parentHeader];
-        const cv = crow[m.childHeader];
-        if(!cellsEqual(pv, cv, nullEquiv)){
-          hasDiff = true;
-          columnDiffs[m.parentHeader].push({
-            key: pair.key, parentVal: pv, childVal: cv,
-            parentIdx: pair.parentIdx, childIdx: pair.childIdx
-          });
-        }
-      }
-      matchedRowsDetail.push({...pair, hasDiff});
-    }
-    setProgress(55 + Math.round((end/Math.max(1,matchedPairs.length))*30));
+    document.getElementById('btnRunMatch').disabled = true;
+    showProgress('Building maps…');
     await nextFrame();
-  }
 
-  const totalCellDiffs = Object.values(columnDiffs).reduce((s,arr)=>s+arr.length,0);
-  const columnsWithDiffs = Object.values(columnDiffs).filter(arr=>arr.length>0).length;
+    const nullEquiv = document.getElementById('optNullEquiv').checked;
 
-  state.results = {
-    mapping, keyCols, nullEquiv,
-    matchedPairs, matchedRowsDetail, missingInChild, missingInParent,
-    duplicateKeys, columnDiffs, totalCellDiffs, columnsWithDiffs
-  };
+    const mapping = state.mapping.filter(m => m.childHeader && !m.excluded);
 
-  setProgress(85);
-  setPhaseText('Rendering report…');
-  await nextFrame();
+    const keyCols = state.keyColumns;
+    const keyColSet = new Set(keyCols);
 
-  renderDashboard();
-  renderReport();
-  document.getElementById('sec-dashboard').classList.remove('hidden');
-  document.getElementById('sec-export').classList.remove('hidden');
-  document.getElementById('sec-report').classList.remove('hidden');
-  setProgress(100);
-  await nextFrame();
-  hideProgress();
-  document.getElementById('btnRunMatch').disabled = false;
-  document.getElementById('sec-dashboard').scrollIntoView({behavior:'smooth', block:'start'});
+    const keyChildHeaders = keyCols.map(
+        pk => state.mapping.find(mm => mm.parentHeader === pk).childHeader
+    );
+
+    const childKeyGetter = row =>
+        keyChildHeaders.map(ch => normalizeCell(row[ch], true)).join("‡");
+
+    const parentKeyGetter = row =>
+        keyCols.map(pk => normalizeCell(row[pk], true)).join("‡");
+
+    // Build child lookup
+    const childMap = new Map();
+
+    state.child.rows.forEach((row, i) => {
+
+        const k = childKeyGetter(row);
+
+        if (!childMap.has(k))
+            childMap.set(k, []);
+
+        childMap.get(k).push(i);
+
+    });
+
+    // Parent duplicate counts
+    const parentCountByKey = new Map();
+
+    state.parent.rows.forEach(row => {
+
+        const k = parentKeyGetter(row);
+
+        parentCountByKey.set(
+            k,
+            (parentCountByKey.get(k) || 0) + 1
+        );
+
+    });
+
+    setProgress(20);
+    setPhaseText("Matching rows…");
+    await nextFrame();
+
+    const matchedPairs = [];
+    const missingInChild = [];
+    const duplicateKeys = new Set();
+
+    const compareCols = mapping.filter(
+        m => !keyColSet.has(m.parentHeader)
+    );
+
+    const usedChildRows = new Set();
+
+    // Match rows
+    state.parent.rows.forEach((prow, pi) => {
+
+        const k = parentKeyGetter(prow);
+
+        const candidates = childMap.get(k);
+
+        if (
+            (parentCountByKey.get(k) || 0) > 1 ||
+            (candidates && candidates.length > 1)
+        ) {
+            duplicateKeys.add(k);
+        }
+
+        if (!candidates) {
+            missingInChild.push(pi);
+            return;
+        }
+
+        let bestChildIdx = null;
+        let bestScore = -1;
+
+        for (const ci of candidates) {
+
+            if (usedChildRows.has(ci))
+                continue;
+
+            const crow = state.child.rows[ci];
+
+            let score = 0;
+
+            for (const col of compareCols) {
+
+                if (
+                    cellsEqual(
+                        prow[col.parentHeader],
+                        crow[col.childHeader],
+                        nullEquiv
+                    )
+                ) {
+                    score++;
+                }
+
+            }
+
+            if (score > bestScore) {
+                bestScore = score;
+                bestChildIdx = ci;
+            }
+
+        }
+
+        if (bestChildIdx !== null) {
+
+            usedChildRows.add(bestChildIdx);
+
+            matchedPairs.push({
+                parentIdx: pi,
+                childIdx: bestChildIdx,
+                key: k
+            });
+
+        } else {
+
+            missingInChild.push(pi);
+
+        }
+
+    });
+
+    // Missing rows in Source
+    const missingInParent = [];
+
+    state.child.rows.forEach((row, ci) => {
+
+        if (!usedChildRows.has(ci))
+            missingInParent.push(ci);
+
+    });
+
+    setProgress(55);
+    setPhaseText("Comparing columns…");
+    await nextFrame();
+
+    const columnDiffs = {};
+
+    compareCols.forEach(col => {
+        columnDiffs[col.parentHeader] = [];
+    });
+
+    const matchedRowsDetail = [];
+
+    const CHUNK = 3000;
+
+    for (let start = 0; start < matchedPairs.length; start += CHUNK) {
+
+        const end = Math.min(start + CHUNK, matchedPairs.length);
+
+        for (let i = start; i < end; i++) {
+
+            const pair = matchedPairs[i];
+
+            const prow = state.parent.rows[pair.parentIdx];
+            const crow = state.child.rows[pair.childIdx];
+
+            let hasDiff = false;
+
+            for (const col of compareCols) {
+
+                const pv = prow[col.parentHeader];
+                const cv = crow[col.childHeader];
+
+                if (!cellsEqual(pv, cv, nullEquiv)) {
+
+                    hasDiff = true;
+
+                    columnDiffs[col.parentHeader].push({
+
+                        key: pair.key,
+
+                        parentVal: pv,
+                        childVal: cv,
+
+                        parentIdx: pair.parentIdx,
+                        childIdx: pair.childIdx
+
+                    });
+
+                }
+
+            }
+
+            matchedRowsDetail.push({
+                ...pair,
+                hasDiff
+            });
+
+        }
+
+        setProgress(
+            55 +
+            Math.round(
+                (end / Math.max(1, matchedPairs.length)) * 30
+            )
+        );
+
+        await nextFrame();
+
+    }
+
+    const totalCellDiffs =
+        Object.values(columnDiffs)
+            .reduce((s, arr) => s + arr.length, 0);
+
+    const columnsWithDiffs =
+        Object.values(columnDiffs)
+            .filter(arr => arr.length > 0)
+            .length;
+
+    state.results = {
+
+        mapping,
+        keyCols,
+        nullEquiv,
+
+        matchedPairs,
+        matchedRowsDetail,
+
+        missingInChild,
+        missingInParent,
+
+        duplicateKeys,
+
+        columnDiffs,
+
+        totalCellDiffs,
+        columnsWithDiffs
+
+    };
+
+    setProgress(85);
+    setPhaseText("Rendering report…");
+    await nextFrame();
+
+    renderDashboard();
+    renderReport();
+
+    document.getElementById("sec-dashboard").classList.remove("hidden");
+    document.getElementById("sec-export").classList.remove("hidden");
+    document.getElementById("sec-report").classList.remove("hidden");
+
+    setProgress(100);
+    await nextFrame();
+
+    hideProgress();
+
+    document.getElementById("btnRunMatch").disabled = false;
+
+    document.getElementById("sec-dashboard")
+        .scrollIntoView({
+            behavior: "smooth",
+            block: "start"
+        });
+
 }
-
 /* ============ DASHBOARD ============ */
 function renderDashboard(){
   const r = state.results;
-  const perfect = r.totalCellDiffs===0 && r.missingInChild.length===0 && r.missingInParent.length===0 && r.duplicateKeys.size===0;
+  const perfect = r.totalCellDiffs===0 && r.missingInChild.length===0 && r.missingInParent.length===0;
   document.getElementById('stampRow').innerHTML = `
     <div class="stamp ${perfect?'':'discrepant'}">${perfect?'Reconciled':'Discrepancies Found'}</div>
     <div style="font-size:12.5px; color:var(--ink-soft);">${state.parent.file.name} <span style="opacity:.5;">vs</span> ${state.child.file.name}</div>
